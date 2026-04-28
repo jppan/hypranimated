@@ -753,7 +753,13 @@ void forceCurrentRenderDamage(PHLMONITOR monitor, const CRegion& damage) {
     if (!currentMonitor || currentMonitor.get() != monitor.get())
         return;
 
-    g_pHyprOpenGL->setDamage(damage, damage);
+    auto combinedDamage = g_pHyprOpenGL->m_renderData.damage.copy();
+    combinedDamage.add(damage);
+
+    auto combinedFinalDamage = g_pHyprOpenGL->m_renderData.finalDamage.copy();
+    combinedFinalDamage.add(damage);
+
+    g_pHyprOpenGL->setDamage(combinedDamage, combinedFinalDamage);
 }
 
 class CAnimatedShaderPassElement : public IPassElement {
@@ -899,6 +905,13 @@ class CBindOffMainPassElement : public IPassElement {
 
     CRegion opaqueRegion() override {
         return {};
+    }
+
+    bool disableSimplification() override {
+        // The following window surface passes render into this private capture
+        // framebuffer, not the main framebuffer, so they must not occlude main
+        // pass damage behind the animated window.
+        return true;
     }
 
     const char* passName() override {
