@@ -101,7 +101,7 @@ struct SMonitorShaderState {
 
 struct SWindowRenderTarget {
     CFramebuffer sourceFramebuffer;
-    CFramebuffer outputFramebuffer;
+    CFramebuffer passthroughFramebuffer;
 };
 
 struct SWorkspaceSwitchRenderState {
@@ -745,35 +745,6 @@ void damageAnimationGeometry(PHLMONITOR monitor, const CBox& geometryPx) {
         g_pHyprRenderer->damageBox(monitorPixelBoxToLayoutBox(clipped, monitor));
 }
 
-bool renderShaderToFramebuffer(CFramebuffer& target, SP<CTexture> sourceTexture, CAnimationShader* shader, const CBox& geometryPx, const CBox& sourceGeometryPx,
-                               const Vector2D& monitorSize, float progress, float seed, const CRegion& damage) {
-    if (!g_pHyprOpenGL || !target.isAllocated() || !sourceTexture || !shader)
-        return false;
-
-    auto* previousCurrentFB = g_pHyprOpenGL->m_renderData.currentFB;
-    GLint previousDrawFB   = 0;
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFB);
-
-    const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
-
-    target.bind();
-    g_pHyprOpenGL->m_renderData.currentFB = &target;
-    glClearColor(0.F, 0.F, 0.F, 0.F);
-    g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, false);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    shader->render(sourceTexture, geometryPx, sourceGeometryPx, monitorSize, progress, seed, damage);
-
-    if (previousCurrentFB)
-        previousCurrentFB->bind();
-    else
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previousDrawFB);
-
-    g_pHyprOpenGL->m_renderData.currentFB = previousCurrentFB;
-    g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, scissorEnabled == GL_TRUE);
-    return true;
-}
-
 void forceCurrentRenderDamage(PHLMONITOR monitor, const CRegion& damage) {
     if (!monitor || !g_pHyprOpenGL || damage.empty())
         return;
@@ -1021,25 +992,18 @@ class CWindowShaderTransformer : public IWindowTransformer {
             return in;
         }
 
-        if (!m_renderTarget->sourceFramebuffer.isAllocated() || !m_renderTarget->sourceFramebuffer.getTexture()) {
+        auto* passthrough = clearPassthroughFramebuffer(monitor);
+        if (!passthrough) {
             m_done = true;
             return in;
         }
 
-        if (!ensureFramebuffer(m_renderTarget->outputFramebuffer, m_renderTarget->sourceFramebuffer.m_size, ANIMATION_FB_FORMAT)) {
-            m_done = true;
-            return in;
-        }
-
-        if (!renderShaderToFramebuffer(m_renderTarget->outputFramebuffer, m_renderTarget->sourceFramebuffer.getTexture(), m_shader, geometry, geometry, monitorSize, progress,
-                                       seed, damage)) {
-            m_done = true;
-            return in;
-        }
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CAnimatedShaderPassElement>(&m_renderTarget->sourceFramebuffer, m_shader, geometry, geometry, monitorSize, progress,
+                                                                                 seed, damage));
 
         damageAnimationGeometry(monitor, geometry);
         g_pHyprOpenGL->blend(true);
-        return &m_renderTarget->outputFramebuffer;
+        return passthrough;
     }
 
     bool done() const {
@@ -1062,6 +1026,36 @@ class CWindowShaderTransformer : public IWindowTransformer {
     CAnimationShader*                        m_shader = nullptr;
     CBox                                     m_geometry;
     bool                                     m_done = false;
+
+    CFramebuffer* clearPassthroughFramebuffer(PHLMONITOR monitor) {
+        if (!monitor || !g_pHyprOpenGL || !m_renderTarget)
+            return nullptr;
+
+        auto& passthrough = m_renderTarget->passthroughFramebuffer;
+        if (!ensureFramebuffer(passthrough, monitor->m_pixelSize, ANIMATION_FB_FORMAT))
+            return nullptr;
+
+        auto* previousCurrentFB = g_pHyprOpenGL->m_renderData.currentFB;
+        GLint previousDrawFB   = 0;
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFB);
+
+        const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+
+        passthrough.bind();
+        g_pHyprOpenGL->m_renderData.currentFB = &passthrough;
+        glClearColor(0.F, 0.F, 0.F, 0.F);
+        g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, false);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        if (previousCurrentFB)
+            previousCurrentFB->bind();
+        else
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previousDrawFB);
+
+        g_pHyprOpenGL->m_renderData.currentFB = previousCurrentFB;
+        g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, scissorEnabled == GL_TRUE);
+        return &passthrough;
+    }
 
     float rawAnimationProgress() {
         if (m_workspaceSwitch)
