@@ -1,0 +1,11 @@
+[repository]
+name = "hypranimated"
+authors = ["jppan"]
+
+[hypranimated]
+description = "Highly unstable WIP plugin using niri-style GLSL shaders as Hyprland window open and close animations"
+authors = ["jppan"]
+output = "hypranimated.so"
+build = [
+    "make all",
+]
