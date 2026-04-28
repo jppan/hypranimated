@@ -951,6 +951,7 @@ class CWindowShaderTransformer : public IWindowTransformer {
         m_geometry = scaledGeometry(CBox{renderData->pos.x, renderData->pos.y, renderData->w, renderData->h}, monitor);
 
         if (animationComplete()) {
+            finishOpenWindowState();
             m_done = true;
             if (m_workspaceSwitch)
                 m_workspaceSwitch->finished = true;
@@ -962,6 +963,8 @@ class CWindowShaderTransformer : public IWindowTransformer {
             forceCurrentRenderDamage(monitor, animationDamageForGeometry(geometry, monitor->m_transformedSize));
             g_pHyprRenderer->m_renderPass.add(makeUnique<CBindOffMainPassElement>(m_renderTarget));
             renderData->fadeAlpha = 1.F;
+            if (!m_workspaceSwitch && m_kind == EAnimationKind::OPEN)
+                renderData->blur = false;
         } else {
             m_done = true;
         }
@@ -986,6 +989,7 @@ class CWindowShaderTransformer : public IWindowTransformer {
 
         const float rawProgress = rawAnimationProgress();
         if (rawProgress >= 1.F) {
+            finishOpenWindowState();
             if (m_workspaceSwitch)
                 m_workspaceSwitch->finished = true;
 
@@ -1020,7 +1024,11 @@ class CWindowShaderTransformer : public IWindowTransformer {
     }
 
     bool done() const {
-        return m_done || !enabled() || !m_window.lock() || animationCompleteByClock();
+        const auto window = m_window.lock();
+        if (m_done || !enabled() || !window || !window->m_isMapped || window->m_fadingOut)
+            return true;
+
+        return m_workspaceSwitch && animationCompleteByClock();
     }
 
     SP<SWorkspaceSwitchRenderState> workspaceSwitch() const {
@@ -1039,6 +1047,25 @@ class CWindowShaderTransformer : public IWindowTransformer {
     CAnimationShader*                        m_shader = nullptr;
     CBox                                     m_geometry;
     bool                                     m_done = false;
+
+    void finishOpenWindowState() {
+        if (m_workspaceSwitch || m_kind != EAnimationKind::OPEN)
+            return;
+
+        const auto window = m_window.lock();
+        if (!window)
+            return;
+
+        window->m_realPosition->setValueAndWarp(window->m_realPosition->goal());
+        window->m_realSize->setValueAndWarp(window->m_realSize->goal());
+        window->m_alpha->setValueAndWarp(1.F);
+        window->m_movingFromWorkspaceAlpha->setValueAndWarp(1.F);
+        window->m_movingToWorkspaceAlpha->setValueAndWarp(1.F);
+        window->m_animatingIn = false;
+
+        if (g_pHyprRenderer)
+            g_pHyprRenderer->damageWindow(window, true);
+    }
 
     CFramebuffer* clearPassthroughFramebuffer(PHLMONITOR monitor) {
         if (!monitor || !g_pHyprOpenGL || !m_renderTarget)
