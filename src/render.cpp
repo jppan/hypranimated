@@ -229,7 +229,10 @@ CBox scaledGeometry(const CBox& logicalBox, PHLMONITOR monitor) {
 }
 
 CBox expandedWindowGeometry(const CBox& logicalBox, PHLWINDOW window) {
-    const double borderSize = std::max(window ? window->getRealBorderSize() : 0, 0);
+    if (!window || window->isFullscreen())
+        return logicalBox;
+
+    const double borderSize = std::max(window->getRealBorderSize(), 0);
     if (borderSize <= 0.0)
         return logicalBox;
 

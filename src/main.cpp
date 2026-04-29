@@ -86,7 +86,7 @@ PLUGIN_DESCRIPTION_INFO pluginInitImpl(HANDLE handle) {
         throw;
     }
 
-    return {"hypranimated", "Niri-style shader window animations for Hyprland", "jppan", "1.0"};
+    return {"hypranimated", "Niri-style shader window animations for Hyprland", "jppan", "1.1"};
 }
 
 void pluginExitImpl() {
