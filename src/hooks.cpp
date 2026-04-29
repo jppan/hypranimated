@@ -75,8 +75,8 @@ void hkStartWindowAnimation(void* thisptr, PHLWINDOW window, CDesktopAnimationMa
 }
 
 void hkStartWorkspaceAnimation(void* thisptr, PHLWORKSPACE workspace, CDesktopAnimationManager::eAnimationType type, bool left, bool instant) {
-    if (g_unloading || !workspaceSwitchEnabled() || !workspace || workspace->m_isSpecialWorkspace || !shaderFileAvailable(EAnimationKind::OPEN) ||
-        !shaderFileAvailable(EAnimationKind::CLOSE)) {
+    if (g_unloading || !workspaceSwitchEnabled() || !workspace || workspace->m_isSpecialWorkspace ||
+        (!shaderFileAvailable(EAnimationKind::OPEN) && !shaderFileAvailable(EAnimationKind::CLOSE))) {
         callOriginalStartWorkspaceAnimation(thisptr, workspace, type, left, instant);
         return;
     }

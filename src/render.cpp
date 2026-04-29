@@ -210,7 +210,7 @@ class CAnimatedBlurPassElement : public IPassElement {
 
 class CBindOffMainPassElement : public IPassElement {
   public:
-    explicit CBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget = {}) : m_renderTarget(std::move(renderTarget)) {
+    explicit CBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget = {}, bool clear = true) : m_renderTarget(std::move(renderTarget)), m_clear(clear) {
     }
 
     void draw(const CRegion&) override {
@@ -243,9 +243,11 @@ class CBindOffMainPassElement : public IPassElement {
 
         target->bind();
         g_pHyprOpenGL->m_renderData.currentFB = target;
-        glClearColor(0.F, 0.F, 0.F, 0.F);
         g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, false);
-        glClear(GL_COLOR_BUFFER_BIT);
+        if (m_clear) {
+            glClearColor(0.F, 0.F, 0.F, 0.F);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
     }
 
     bool needsLiveBlur() override {
@@ -280,6 +282,7 @@ class CBindOffMainPassElement : public IPassElement {
 
   private:
     SP<SWindowRenderTarget> m_renderTarget;
+    bool                    m_clear = true;
 };
 
 } // namespace
@@ -371,8 +374,8 @@ UP<IPassElement> makeAnimatedBlurPassElement(CBox geometryPx, Vector2D monitorSi
     return makeUnique<CAnimatedBlurPassElement>(std::move(geometryPx), std::move(monitorSize), alpha, round, roundingPower, std::move(damage));
 }
 
-UP<IPassElement> makeBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget) {
-    return makeUnique<CBindOffMainPassElement>(std::move(renderTarget));
+UP<IPassElement> makeBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget, bool clear) {
+    return makeUnique<CBindOffMainPassElement>(std::move(renderTarget), clear);
 }
 
 } // namespace hypranimated

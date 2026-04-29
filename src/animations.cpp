@@ -120,7 +120,7 @@ bool canAnimateWorkspaceWindow(PHLWINDOW window, PHLWORKSPACE workspace) {
     if (!windowBelongsToWorkspace(window, workspace))
         return false;
 
-    if (!window->m_isMapped || window->m_fadingOut || window->m_readyToDelete || window->m_pinned || window->isHidden() || window->desktopComponent())
+    if (!window->m_isMapped || window->m_fadingOut || window->m_readyToDelete || window->m_pinned || window->isHidden())
         return false;
 
     return true;
@@ -177,6 +177,36 @@ void cancelWorkspaceSwitchesForMonitor(PHLMONITOR monitor) {
                                   return !state || (stateMonitor && stateMonitor->m_id == monitor->m_id);
                               }),
                               g_workspaceSwitches.end());
+}
+
+SP<SWorkspaceSwitchRenderState> workspaceSwitchFor(PHLMONITOR monitor, PHLWORKSPACE workspace, std::optional<EAnimationKind> kind = std::nullopt) {
+    if (!monitor || !workspace)
+        return {};
+
+    for (auto const& state : g_workspaceSwitches) {
+        const auto stateMonitor = state ? state->monitor.lock() : nullptr;
+        const auto toWorkspace  = state ? state->toWorkspace.lock() : nullptr;
+        if (state && !state->finished && (!kind || state->kind == *kind) && stateMonitor && stateMonitor->m_id == monitor->m_id && toWorkspace &&
+            toWorkspace.get() == workspace.get())
+            return state;
+    }
+
+    return {};
+}
+
+void removeAnimatedTransformersForWindow(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    auto& transformers = window->m_transformers;
+    transformers.erase(std::remove_if(transformers.begin(), transformers.end(), [](const auto& transformer) {
+                           if (!g_animatedTransformers.contains(transformer.get()))
+                               return false;
+
+                           g_animatedTransformers.erase(transformer.get());
+                           return true;
+                       }),
+                       transformers.end());
 }
 
 bool attachWorkspaceTransformer(PHLWINDOW window, EAnimationKind kind, const SP<SWorkspaceSwitchRenderState>& state) {
@@ -286,9 +316,8 @@ PHLWORKSPACE rememberedActiveWorkspace(PHLMONITOR monitor) {
     return nullptr;
 }
 
-void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride) {
-    if (!workspaceSwitchEnabled() || !workspace || workspace->m_isSpecialWorkspace || !shaderFileAvailable(EAnimationKind::OPEN) ||
-        !shaderFileAvailable(EAnimationKind::CLOSE))
+void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride, bool forceSameWorkspace) {
+    if (!workspaceSwitchEnabled() || !workspace || workspace->m_isSpecialWorkspace)
         return;
 
     sweepAnimations();
@@ -301,18 +330,52 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     auto fromWorkspace     = fromWorkspaceOverride ? fromWorkspaceOverride : state.activeWorkspace.lock();
     state.activeWorkspace  = workspace;
     const bool sameWorkspace = fromWorkspace && fromWorkspace.get() == workspace.get();
-    if (sameWorkspace)
+    if (sameWorkspace && !forceSameWorkspace)
         return;
-
-    cancelWorkspaceSwitchesForMonitor(monitor);
+    if (sameWorkspace)
+        fromWorkspace.reset();
 
     if (fromWorkspace && fromWorkspace->m_isSpecialWorkspace)
         fromWorkspace.reset();
 
-    // workspace shader transitions render each old/new workspace window in-place.
+    std::vector<PHLWINDOW> windows;
+    if (g_pCompositor) {
+        for (auto const& window : g_pCompositor->m_windows) {
+            if (canAnimateWorkspaceWindow(window, workspace))
+                windows.emplace_back(window);
+        }
+    }
+
+    auto           kind = EAnimationKind::OPEN;
+    PHLWORKSPACE   captureWorkspace = workspace;
+    const bool     destinationEmpty = windows.empty();
+    if (destinationEmpty) {
+        if (!fromWorkspace || !shaderFileAvailable(EAnimationKind::CLOSE))
+            return;
+
+        kind             = EAnimationKind::CLOSE;
+        captureWorkspace = fromWorkspace;
+        if (g_pCompositor) {
+            for (auto const& window : g_pCompositor->m_windows) {
+                if (canAnimateWorkspaceWindow(window, captureWorkspace))
+                    windows.emplace_back(window);
+            }
+        }
+    } else if (!shaderFileAvailable(EAnimationKind::OPEN)) {
+        return;
+    }
+
+    if (windows.empty() || workspaceSwitchFor(monitor, workspace, kind))
+        return;
+
+    // Workspace switches render eligible windows through one monitor-sized shader pass.
+    const bool previousForceRendering = fromWorkspace ? fromWorkspace->m_forceRendering : false;
+    cancelWorkspaceSwitchesForMonitor(monitor);
     forceWorkspaceInstant(workspace, true);
-    if (fromWorkspace)
-        forceWorkspaceInstant(fromWorkspace, true);
+    if (kind == EAnimationKind::CLOSE && captureWorkspace) {
+        forceWorkspaceInstant(captureWorkspace, true);
+        captureWorkspace->m_forceRendering = true;
+    }
 
     const auto fromWorkspaceId = fromWorkspace ? fromWorkspace->m_id : WORKSPACE_INVALID;
     const auto seedKey = (static_cast<uintptr_t>(monitor->m_id) << 32U) ^ static_cast<uintptr_t>(fromWorkspaceId) ^
@@ -323,23 +386,15 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     switchState->toWorkspace            = PHLWORKSPACEREF{workspace};
     switchState->startedAt              = std::chrono::steady_clock::now();
     switchState->cfg                    = effectConfig();
-    switchState->seed                   = randomSeed(seedKey, EAnimationKind::OPEN);
-    switchState->previousForceRendering = fromWorkspace ? fromWorkspace->m_forceRendering : false;
+    switchState->renderTarget           = makeShared<SWindowRenderTarget>();
+    switchState->kind                   = kind;
+    switchState->seed                   = randomSeed(seedKey, kind);
+    switchState->previousForceRendering = previousForceRendering;
 
     size_t attached = 0;
-    if (fromWorkspace)
-        fromWorkspace->m_forceRendering = true;
-
-    if (g_pCompositor) {
-        for (auto const& window : g_pCompositor->m_windows) {
-            if (!window)
-                continue;
-
-            if (fromWorkspace && canAnimateWorkspaceWindow(window, fromWorkspace) && attachWorkspaceTransformer(window, EAnimationKind::CLOSE, switchState))
-                ++attached;
-            else if (canAnimateWorkspaceWindow(window, workspace) && attachWorkspaceTransformer(window, EAnimationKind::OPEN, switchState))
-                ++attached;
-        }
+    for (auto const& window : windows) {
+        if (attachWorkspaceTransformer(window, kind, switchState))
+            ++attached;
     }
 
     if (attached == 0) {
@@ -372,6 +427,59 @@ void sweepWorkspaceSwitches() {
 }
 
 void renderWorkspaceSwitchForCurrentMonitor() {
+    if (!g_pHyprOpenGL || !g_pHyprOpenGL->m_renderData.pMonitor) {
+        return;
+    }
+
+    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    if (!monitor || monitor->isMirror()) {
+        return;
+    }
+
+    for (auto& state : g_workspaceSwitches) {
+        const auto stateMonitor = state ? state->monitor.lock() : nullptr;
+        if (!state || state->finished || !stateMonitor || stateMonitor->m_id != monitor->m_id)
+            continue;
+
+        if (!state->sourceCaptured || !state->renderTarget)
+            continue;
+
+        if (!state->renderTarget->sourceFramebuffer.getTexture()) {
+            state->sourceCleared  = false;
+            state->sourceCaptured = false;
+            state->capturedDamage.clear();
+            continue;
+        }
+
+        auto* shader = shaderFor(state->kind);
+        if (!shader) {
+            state->finished = true;
+            restoreWorkspaceSwitchState(state);
+            continue;
+        }
+
+        const float rawProgress = elapsedProgress(state->startedAt, state->cfg);
+        if (rawProgress >= 1.F) {
+            state->finished = true;
+            restoreWorkspaceSwitchState(state);
+            continue;
+        }
+
+        const auto  monitorSize = monitor->m_transformedSize;
+        const CBox  geometryPx  = {0, 0, monitorSize.x, monitorSize.y};
+        const auto  damage      = animationDamageForGeometry(geometryPx, monitorSize);
+        const float progress    = ease(rawProgress, state->cfg.curve);
+        if (!damage.empty()) {
+            g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(state->renderTarget->sourceFramebuffer.getTexture(), shader, geometryPx, geometryPx,
+                                                                            monitorSize, progress, state->seed, 1.F, damage));
+            damageAnimationGeometry(monitor, geometryPx);
+        }
+
+        state->sourceCleared  = false;
+        state->sourceCaptured = false;
+        state->capturedDamage.clear();
+    }
+
     rememberActiveWorkspaceForCurrentMonitor();
 }
 
@@ -478,6 +586,35 @@ void onWindowClose(PHLWINDOW window) {
     }
 
     ensureClosingAnimation(window);
+}
+
+void onWindowMoveToWorkspace(PHLWINDOW window, PHLWORKSPACE workspace) {
+    if (!window)
+        return;
+
+    g_closing.erase(windowKey(window));
+
+    if (!workspaceSwitchEnabled() || !workspace || workspace->m_isSpecialWorkspace)
+        return;
+
+    const auto monitor = workspace->m_monitor.lock();
+    if (!monitor || monitor->isMirror() || !monitor->m_activeWorkspace || monitor->m_activeWorkspace.get() != workspace.get())
+        return;
+
+    auto state = workspaceSwitchFor(monitor, workspace, EAnimationKind::OPEN);
+    if (!state) {
+        if (canAnimateWorkspaceWindow(window, workspace))
+            removeAnimatedTransformersForWindow(window);
+        startWorkspaceSwitchAnimation(workspace, nullptr, true);
+        return;
+    }
+
+    if (!canAnimateWorkspaceWindow(window, workspace))
+        return;
+
+    removeAnimatedTransformersForWindow(window);
+    if (attachWorkspaceTransformer(window, EAnimationKind::OPEN, state))
+        g_pHyprRenderer->damageWindow(window, true);
 }
 
 void sweepAnimations() {

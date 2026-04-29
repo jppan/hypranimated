@@ -111,8 +111,13 @@ struct SWorkspaceSwitchRenderState {
     PHLWORKSPACEREF                       toWorkspace;
     std::chrono::steady_clock::time_point startedAt;
     SEffectConfig                         cfg;
+    SP<SWindowRenderTarget>               renderTarget;
+    CRegion                               capturedDamage;
+    EAnimationKind                         kind                  = EAnimationKind::OPEN;
     float                                 seed                  = 0.F;
     bool                                  previousForceRendering = false;
+    bool                                  sourceCleared          = false;
+    bool                                  sourceCaptured         = false;
     bool                                  finished              = false;
     bool                                  restored              = false;
 };
@@ -227,7 +232,7 @@ UP<IPassElement> makeAnimatedShaderPassElement(SP<CTexture> texture, CAnimationS
 UP<IPassElement> makeAnimatedShaderPassElement(CFramebuffer* liveSourceFramebuffer, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx,
                                                Vector2D monitorSize, float progress, float seed, float outputAlpha, CRegion damage);
 UP<IPassElement> makeAnimatedBlurPassElement(CBox geometryPx, Vector2D monitorSize, float alpha, int round, float roundingPower, CRegion damage);
-UP<IPassElement> makeBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget = {});
+UP<IPassElement> makeBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget = {}, bool clear = true);
 
 class CWindowShaderTransformer : public IWindowTransformer {
   public:
@@ -267,13 +272,14 @@ void restoreAnimationConfigs();
 void finishAllWorkspaceSwitches();
 void rememberActiveWorkspacesForAllMonitors();
 PHLWORKSPACE rememberedActiveWorkspace(PHLMONITOR monitor);
-void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride = nullptr);
+void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride = nullptr, bool forceSameWorkspace = false);
 void sweepWorkspaceSwitches();
 void renderWorkspaceSwitchForCurrentMonitor();
 void detectWorkspaceSwitchForCurrentMonitor();
 bool hasAnimatedTransformer(PHLWINDOW window);
 void onWindowOpen(PHLWINDOW window);
 void onWindowClose(PHLWINDOW window);
+void onWindowMoveToWorkspace(PHLWINDOW window, PHLWORKSPACE workspace);
 void sweepAnimations();
 void renderAnimatedSnapshot(void* thisptr, PHLWINDOW window);
 bool shouldOwnHyprlandWindowAnimation(PHLWINDOW window, CDesktopAnimationManager::eAnimationType type);

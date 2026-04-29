@@ -31,6 +31,7 @@ PLUGIN_DESCRIPTION_INFO pluginInitImpl(HANDLE handle) {
 
     g_listeners.emplace_back(Event::bus()->m_events.window.open.listen([](PHLWINDOW window) { onWindowOpen(window); }));
     g_listeners.emplace_back(Event::bus()->m_events.window.close.listen([](PHLWINDOW window) { onWindowClose(window); }));
+    g_listeners.emplace_back(Event::bus()->m_events.window.moveToWorkspace.listen([](PHLWINDOW window, PHLWORKSPACE workspace) { onWindowMoveToWorkspace(window, workspace); }));
     g_listeners.emplace_back(Event::bus()->m_events.workspace.active.listen([](PHLWORKSPACE workspace) { startWorkspaceSwitchAnimation(workspace); }));
     g_listeners.emplace_back(Event::bus()->m_events.config.reloaded.listen([] {
         refreshConfigPtrs();
@@ -86,7 +87,7 @@ PLUGIN_DESCRIPTION_INFO pluginInitImpl(HANDLE handle) {
         throw;
     }
 
-    return {"hypranimated", "Niri-style shader window animations for Hyprland", "jppan", "1.1"};
+    return {"hypranimated", "Niri-style shader window animations for Hyprland", "jppan", "1.2"};
 }
 
 void pluginExitImpl() {

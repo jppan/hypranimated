@@ -12,7 +12,7 @@ CWindowShaderTransformer::CWindowShaderTransformer(PHLWINDOW window, EAnimationK
     m_window(window),
     m_kind(kind),
     m_workspaceSwitch(std::move(workspaceSwitch)),
-    m_renderTarget(makeShared<SWindowRenderTarget>()),
+    m_renderTarget(m_workspaceSwitch ? m_workspaceSwitch->renderTarget : makeShared<SWindowRenderTarget>()),
     m_seed(randomSeed(reinterpret_cast<uintptr_t>(window.get()), kind)) {
 }
 
@@ -25,7 +25,7 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
         return;
 
     m_cfg      = m_workspaceSwitch ? m_workspaceSwitch->cfg : effectConfig();
-    m_shader   = shaderFor(m_kind);
+    m_shader   = m_workspaceSwitch ? nullptr : shaderFor(m_kind);
     m_monitor  = renderData->pMonitor;
     m_geometry = expandedScaledGeometry(CBox{renderData->pos.x, renderData->pos.y, renderData->w, renderData->h}, monitor, m_window.lock());
     m_shouldBlur        = renderData->blur;
@@ -37,6 +37,31 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
         m_done = true;
         if (m_workspaceSwitch)
             m_workspaceSwitch->finished = true;
+        return;
+    }
+
+    if (m_workspaceSwitch) {
+        const auto stateMonitor = m_workspaceSwitch->monitor.lock();
+        if (!m_renderTarget || !stateMonitor || stateMonitor.get() != monitor.get()) {
+            m_done = true;
+            return;
+        }
+
+        const auto damage = animationDamageForGeometry(m_geometry, monitor->m_transformedSize);
+        if (damage.empty()) {
+            m_done = true;
+            return;
+        }
+
+        forceCurrentRenderDamage(monitor, damage);
+        m_workspaceSwitch->capturedDamage.add(damage);
+        g_pHyprRenderer->m_renderPass.add(makeBindOffMainPassElement(m_renderTarget, !m_workspaceSwitch->sourceCleared));
+        m_workspaceSwitch->sourceCleared  = true;
+        m_workspaceSwitch->sourceCaptured = true;
+
+        renderData->blur           = false;
+        renderData->discardMode    = 0;
+        renderData->discardOpacity = 0.F;
         return;
     }
 
@@ -55,7 +80,7 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
 }
 
 CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
-    if (!enabled() || !in || !in->getTexture() || !m_monitor || !m_shader || !m_renderTarget) {
+    if (!enabled() || !in || !in->getTexture() || !m_monitor || !m_renderTarget || (!m_workspaceSwitch && !m_shader)) {
         m_done = true;
         return in;
     }
@@ -78,6 +103,25 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
 
         m_done = true;
         return in;
+    }
+
+    if (m_workspaceSwitch) {
+        auto* passthrough = clearPassthroughFramebuffer(monitor);
+        if (!passthrough) {
+            m_done = true;
+            return in;
+        }
+
+        const float progress    = ease(rawProgress, m_cfg.curve);
+        const auto  monitorSize = monitor->m_transformedSize;
+        const auto  damage      = animationDamageForGeometry(m_geometry, monitorSize);
+        const float blurAlpha   = std::clamp(m_kind == EAnimationKind::OPEN ? progress : 1.F - progress, 0.F, 1.F);
+        if (m_shouldBlur && blurAlpha > 0.001F && !damage.empty())
+            g_pHyprRenderer->m_renderPass.add(makeAnimatedBlurPassElement(m_geometry, monitorSize, blurAlpha, m_blurRound, m_blurRoundingPower, damage));
+
+        damageAnimationGeometry(monitor, m_geometry);
+        g_pHyprOpenGL->blend(true);
+        return passthrough;
     }
 
     const float progress    = ease(rawProgress, m_cfg.curve);
