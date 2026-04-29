@@ -69,12 +69,17 @@ void disableWorkspaceSlideAnimations() {
     disableWorkspaceAnimationConfig("workspacesOut");
 }
 
+void forceWorkspaceInstant(PHLWORKSPACE workspace, bool visible);
+
 void restoreWorkspaceSwitchState(const SP<SWorkspaceSwitchRenderState>& state) {
     if (!state || state->restored)
         return;
 
-    if (const auto fromWorkspace = state->fromWorkspace.lock(); fromWorkspace && !fromWorkspace->inert())
+    if (const auto fromWorkspace = state->fromWorkspace.lock(); fromWorkspace && !fromWorkspace->inert()) {
         fromWorkspace->m_forceRendering = state->previousForceRendering;
+        if (!fromWorkspace->isVisible())
+            forceWorkspaceInstant(fromWorkspace, false);
+    }
 
     state->restored = true;
 }
@@ -119,6 +124,16 @@ bool canAnimateWorkspaceWindow(PHLWINDOW window, PHLWORKSPACE workspace) {
         return false;
 
     return true;
+}
+
+bool shouldBlurWindow(PHLWINDOW window) {
+    if (!window)
+        return false;
+
+    static auto PBLUR = CConfigValue<Hyprlang::INT>("decoration:blur:enabled");
+    const bool  dontBlur =
+        window->m_ruleApplicator->noBlur().valueOrDefault() || window->m_ruleApplicator->RGBX().valueOrDefault() || window->opaque();
+    return *PBLUR && !dontBlur;
 }
 
 void cancelWorkspaceSwitchesForMonitor(PHLMONITOR monitor) {
@@ -294,10 +309,10 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     if (fromWorkspace && fromWorkspace->m_isSpecialWorkspace)
         fromWorkspace.reset();
 
-    // workspace shader transitions render both workspaces in-place; hyprland's own slide is suppressed.
+    // workspace shader transitions render each old/new workspace window in-place.
     forceWorkspaceInstant(workspace, true);
     if (fromWorkspace)
-        forceWorkspaceInstant(fromWorkspace, false);
+        forceWorkspaceInstant(fromWorkspace, true);
 
     const auto fromWorkspaceId = fromWorkspace ? fromWorkspace->m_id : WORKSPACE_INVALID;
     const auto seedKey = (static_cast<uintptr_t>(monitor->m_id) << 32U) ^ static_cast<uintptr_t>(fromWorkspaceId) ^
@@ -564,8 +579,14 @@ void renderAnimatedSnapshot(void* thisptr, PHLWINDOW window) {
         return;
     }
 
+    const float blurAlpha = std::clamp(1.F - progress, 0.F, 1.F);
+    if (shouldBlurWindow(window) && blurAlpha > 0.001F) {
+        const int round = std::max(0, static_cast<int>(std::round(window->rounding() * monitor->m_scale)));
+        g_pHyprRenderer->m_renderPass.add(makeAnimatedBlurPassElement(geometryPx, monitor->m_transformedSize, blurAlpha, round, window->roundingPower(), damage));
+    }
+
     g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(fbData->getTexture(), shader, geometryPx, sourceGeometryPx, monitor->m_transformedSize, progress,
-                                                                    it->second.seed, damage));
+                                                                    it->second.seed, 1.F, damage));
     damageAnimationGeometry(monitor, geometryPx);
 }
 

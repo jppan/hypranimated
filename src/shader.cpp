@@ -67,7 +67,7 @@ bool CAnimationShader::valid() const {
 }
 
 void CAnimationShader::render(SP<CTexture> texture, const CBox& geometryPx, const CBox& sourceGeometryPx, const Vector2D& monitorSize, float progress, float seed,
-                              const CRegion& damage) {
+                              float outputAlpha, const CRegion& damage) {
     if (!valid() || !texture || texture->m_texID == 0 || !g_pHyprOpenGL || !g_pHyprOpenGL->m_renderData.pMonitor)
         return;
 
@@ -85,6 +85,7 @@ void CAnimationShader::render(SP<CTexture> texture, const CBox& geometryPx, cons
     glUniform1f(m_uniformSeed, seed);
     glUniform2f(m_uniformMonitorSize, monitorSize.x, monitorSize.y);
     glUniform4f(m_uniformGeometry, geometryPx.x, geometryPx.y, std::max(1.0, geometryPx.w), std::max(1.0, geometryPx.h));
+    glUniform1f(m_uniformOutputAlpha, std::clamp(outputAlpha, 0.F, 1.F));
 
     const float sx = static_cast<float>(sourceGeometryPx.w / std::max(1.0, monitorSize.x));
     const float sy = static_cast<float>(sourceGeometryPx.h / std::max(1.0, monitorSize.y));
@@ -144,6 +145,7 @@ uniform float niri_clamped_progress;
 uniform float niri_random_seed;
 uniform vec2 hypr_monitor_size;
 uniform vec4 hypr_geometry;
+uniform float hypr_output_alpha;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -156,7 +158,7 @@ void main() {{
     vec2 safe_size = max(hypr_geometry.zw, vec2(1.0));
     vec3 coords_geo = vec3((pixel - hypr_geometry.xy) / safe_size, 1.0);
     vec3 size_geo = vec3(safe_size, 1.0);
-    fragColor = {}(coords_geo, size_geo);
+    fragColor = {}(coords_geo, size_geo) * hypr_output_alpha;
 }}
 )GLSL",
                                                         userSource, shaderFunction(m_kind));
@@ -196,10 +198,11 @@ void main() {{
     m_uniformSeed            = glGetUniformLocation(m_program, "niri_random_seed");
     m_uniformMonitorSize     = glGetUniformLocation(m_program, "hypr_monitor_size");
     m_uniformGeometry        = glGetUniformLocation(m_program, "hypr_geometry");
+    m_uniformOutputAlpha     = glGetUniformLocation(m_program, "hypr_output_alpha");
 
     const GLint posAttr = glGetAttribLocation(m_program, "pos");
     const GLint texAttr = glGetAttribLocation(m_program, "texcoord");
-    if (m_uniformProj < 0 || m_uniformMonitorSize < 0 || m_uniformGeometry < 0 || posAttr < 0 || texAttr < 0) {
+    if (m_uniformProj < 0 || m_uniformMonitorSize < 0 || m_uniformGeometry < 0 || m_uniformOutputAlpha < 0 || posAttr < 0 || texAttr < 0) {
         Log::logger->log(Log::ERR, "[hypranimated] shader {} is missing required wrapper uniforms or attributes", m_path.string());
         destroy();
         return;

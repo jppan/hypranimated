@@ -189,7 +189,7 @@ class CAnimationShader {
 
     bool valid() const;
     void render(SP<CTexture> texture, const CBox& geometryPx, const CBox& sourceGeometryPx, const Vector2D& monitorSize, float progress, float seed,
-                const CRegion& damage);
+                float outputAlpha, const CRegion& damage);
 
   private:
     EAnimationKind        m_kind;
@@ -206,6 +206,7 @@ class CAnimationShader {
     GLint m_uniformSeed            = -1;
     GLint m_uniformMonitorSize     = -1;
     GLint m_uniformGeometry        = -1;
+    GLint m_uniformOutputAlpha     = -1;
 
     void create(std::string userSource);
     void destroy();
@@ -222,9 +223,10 @@ CRegion animationDamageForGeometry(const CBox& geometryPx, const Vector2D& monit
 void damageAnimationGeometry(PHLMONITOR monitor, const CBox& geometryPx);
 void forceCurrentRenderDamage(PHLMONITOR monitor, const CRegion& damage);
 UP<IPassElement> makeAnimatedShaderPassElement(SP<CTexture> texture, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize,
-                                               float progress, float seed, CRegion damage);
+                                               float progress, float seed, float outputAlpha, CRegion damage);
 UP<IPassElement> makeAnimatedShaderPassElement(CFramebuffer* liveSourceFramebuffer, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx,
-                                               Vector2D monitorSize, float progress, float seed, CRegion damage);
+                                               Vector2D monitorSize, float progress, float seed, float outputAlpha, CRegion damage);
+UP<IPassElement> makeAnimatedBlurPassElement(CBox geometryPx, Vector2D monitorSize, float alpha, int round, float roundingPower, CRegion damage);
 UP<IPassElement> makeBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget = {});
 
 class CWindowShaderTransformer : public IWindowTransformer {
@@ -249,6 +251,10 @@ class CWindowShaderTransformer : public IWindowTransformer {
     CAnimationShader*                                        m_shader = nullptr;
     CBox                                                     m_geometry;
     bool                                                     m_done = false;
+    bool                                                     m_shouldBlur = false;
+    int                                                      m_blurRound = 0;
+    float                                                    m_blurRoundingPower = 2.F;
+    float                                                    m_outputAlpha = 1.F;
 
     CFramebuffer* clearPassthroughFramebuffer(PHLMONITOR monitor);
     float rawAnimationProgress();

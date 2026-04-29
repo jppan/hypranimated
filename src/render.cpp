@@ -65,7 +65,7 @@ bool coversMonitor(const CBox& geometryPx, const Vector2D& monitorSize) {
 class CAnimatedShaderPassElement : public IPassElement {
   public:
     CAnimatedShaderPassElement(SP<CTexture> texture, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize, float progress, float seed,
-                               CRegion damage) :
+                               float outputAlpha, CRegion damage) :
         m_texture(std::move(texture)),
         m_shader(shader),
         m_geometryPx(std::move(geometryPx)),
@@ -73,11 +73,12 @@ class CAnimatedShaderPassElement : public IPassElement {
         m_monitorSize(std::move(monitorSize)),
         m_progress(progress),
         m_seed(seed),
+        m_outputAlpha(outputAlpha),
         m_damage(std::move(damage)) {
     }
 
     CAnimatedShaderPassElement(CFramebuffer* liveSourceFramebuffer, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize, float progress,
-                               float seed, CRegion damage) :
+                               float seed, float outputAlpha, CRegion damage) :
         m_liveSourceFramebuffer(liveSourceFramebuffer),
         m_shader(shader),
         m_geometryPx(std::move(geometryPx)),
@@ -85,6 +86,7 @@ class CAnimatedShaderPassElement : public IPassElement {
         m_monitorSize(std::move(monitorSize)),
         m_progress(progress),
         m_seed(seed),
+        m_outputAlpha(outputAlpha),
         m_damage(std::move(damage)) {
     }
 
@@ -104,7 +106,7 @@ class CAnimatedShaderPassElement : public IPassElement {
             texture = m_stableSourceFramebuffer.getTexture();
         }
 
-        m_shader->render(texture, m_geometryPx, m_sourceGeometryPx, m_monitorSize, m_progress, m_seed, m_damage.empty() ? damage : m_damage);
+        m_shader->render(texture, m_geometryPx, m_sourceGeometryPx, m_monitorSize, m_progress, m_seed, m_outputAlpha, m_damage.empty() ? damage : m_damage);
     }
 
     bool needsLiveBlur() override {
@@ -145,7 +147,65 @@ class CAnimatedShaderPassElement : public IPassElement {
     Vector2D          m_monitorSize;
     float             m_progress = 0.F;
     float             m_seed     = 0.F;
+    float             m_outputAlpha = 1.F;
     CRegion           m_damage;
+};
+
+class CAnimatedBlurPassElement : public IPassElement {
+  public:
+    CAnimatedBlurPassElement(CBox geometryPx, Vector2D monitorSize, float alpha, int round, float roundingPower, CRegion damage) :
+        m_geometryPx(std::move(geometryPx)),
+        m_monitorSize(std::move(monitorSize)),
+        m_alpha(alpha),
+        m_round(round),
+        m_roundingPower(roundingPower),
+        m_damage(std::move(damage)) {
+    }
+
+    void draw(const CRegion& damage) override {
+        if (!g_pHyprOpenGL || m_alpha <= 0.F || m_geometryPx.w <= 0 || m_geometryPx.h <= 0)
+            return;
+
+        if (g_pHyprOpenGL->m_renderData.mainFB)
+            g_pHyprOpenGL->bindBackOnMain();
+
+        auto effectiveDamage = m_damage.empty() ? damage : m_damage;
+        g_pHyprOpenGL->m_renderData.damage = effectiveDamage;
+        g_pHyprOpenGL->renderRect(m_geometryPx, CHyprColor{0.F, 0.F, 0.F, 0.F},
+                                  {.round = m_round, .roundingPower = m_roundingPower, .blur = true, .blurA = std::clamp(m_alpha, 0.F, 1.F), .xray = false});
+    }
+
+    bool needsLiveBlur() override {
+        return m_alpha > 0.F;
+    }
+
+    bool needsPrecomputeBlur() override {
+        return false;
+    }
+
+    std::optional<CBox> boundingBox() override {
+        if (!g_pHyprOpenGL || !g_pHyprOpenGL->m_renderData.pMonitor)
+            return std::nullopt;
+
+        const auto scale = std::max(0.01F, g_pHyprOpenGL->m_renderData.pMonitor->m_scale);
+        return CBox{m_geometryPx.x / scale, m_geometryPx.y / scale, m_geometryPx.w / scale, m_geometryPx.h / scale};
+    }
+
+    CRegion opaqueRegion() override {
+        return {};
+    }
+
+    const char* passName() override {
+        return "CAnimatedBlurPassElement";
+    }
+
+  private:
+    CBox     m_geometryPx;
+    Vector2D m_monitorSize;
+    float    m_alpha = 1.F;
+    int      m_round = 0;
+    float    m_roundingPower = 2.F;
+    CRegion  m_damage;
 };
 
 class CBindOffMainPassElement : public IPassElement {
@@ -296,15 +356,19 @@ void forceCurrentRenderDamage(PHLMONITOR monitor, const CRegion& damage) {
 }
 
 UP<IPassElement> makeAnimatedShaderPassElement(SP<CTexture> texture, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize, float progress,
-                                               float seed, CRegion damage) {
+                                               float seed, float outputAlpha, CRegion damage) {
     return makeUnique<CAnimatedShaderPassElement>(std::move(texture), shader, std::move(geometryPx), std::move(sourceGeometryPx), std::move(monitorSize), progress, seed,
-                                                  std::move(damage));
+                                                  outputAlpha, std::move(damage));
 }
 
 UP<IPassElement> makeAnimatedShaderPassElement(CFramebuffer* liveSourceFramebuffer, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize,
-                                               float progress, float seed, CRegion damage) {
+                                               float progress, float seed, float outputAlpha, CRegion damage) {
     return makeUnique<CAnimatedShaderPassElement>(liveSourceFramebuffer, shader, std::move(geometryPx), std::move(sourceGeometryPx), std::move(monitorSize), progress, seed,
-                                                  std::move(damage));
+                                                  outputAlpha, std::move(damage));
+}
+
+UP<IPassElement> makeAnimatedBlurPassElement(CBox geometryPx, Vector2D monitorSize, float alpha, int round, float roundingPower, CRegion damage) {
+    return makeUnique<CAnimatedBlurPassElement>(std::move(geometryPx), std::move(monitorSize), alpha, round, roundingPower, std::move(damage));
 }
 
 UP<IPassElement> makeBindOffMainPassElement(SP<SWindowRenderTarget> renderTarget) {
