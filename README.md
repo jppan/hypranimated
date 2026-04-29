@@ -34,3 +34,5 @@ Set `duration_ms = 0` to use an effect directory's `config` file `duration-ms`; 
 `workspace_switch = true` disables Hyprland's normal workspace animations at runtime and replaces them with one monitor-sized shader pass. Each mapped, non-pinned window on the new workspace is captured into a transparent framebuffer, and the shared `open.glsl` output is patched back over those window regions using monitor-centered coordinates so effects like smoke originate from the center of the screen. Layer surfaces such as Waybar and wallpaper are not captured. Empty destination workspaces do not trigger an open effect; if the previous workspace had windows, those windows are captured instead and rendered through one shared `close.glsl` pass.
 
 `sync_hyprland = true` makes Hyprland's `windowsMove` animation use the same duration as `duration_ms`, so tiled resize/move animations stay in time with the shader window animations.
+
+Shader credit goes to https://github.com/liixini/shaders.
