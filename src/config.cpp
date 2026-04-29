@@ -18,10 +18,24 @@ Hyprlang::STRING const* configStringPtr(const std::string& name) {
     return value ? reinterpret_cast<Hyprlang::STRING const*>(value->getDataStaticPtr()) : nullptr;
 }
 
+int configInt(const std::string& name, int fallback) {
+    const auto* ptr = configPtr<Hyprlang::INT>(name);
+    return ptr ? static_cast<int>(*ptr) : fallback;
+}
+
+std::string configString(const std::string& name, std::string fallback) {
+    const auto* ptr = configStringPtr(name);
+    if (!ptr)
+        return fallback;
+
+    auto value = trim(*ptr);
+    return value.empty() ? fallback : value;
+}
+
 SEffectConfig readEffectConfig() {
     SEffectConfig out;
 
-    const int configuredDuration = g_config.durationMs ? *g_config.durationMs : 350;
+    const int configuredDuration = configInt("duration_ms", 350);
     if (configuredDuration > 0)
         out.durationMs = std::clamp(configuredDuration, 1, 10000);
 
@@ -51,7 +65,7 @@ SEffectConfig readEffectConfig() {
 }
 
 std::string effectConfigKey() {
-    const int configuredDuration = g_config.durationMs ? *g_config.durationMs : 350;
+    const int configuredDuration = configInt("duration_ms", 350);
     return std::format("{}\n{}\n{}", shadersDir().string(), effectName(), configuredDuration);
 }
 
@@ -89,25 +103,24 @@ void refreshConfigPtrs() {
 }
 
 bool enabled() {
-    return !g_unloading && g_config.enabled && *g_config.enabled && g_pHyprRenderer && g_pHyprOpenGL;
+    const int cfgEnabled = configInt("enabled", 1);
+    return !g_unloading && cfgEnabled && g_pHyprRenderer && g_pHyprOpenGL;
 }
 
 bool workspaceSwitchEnabled() {
-    return enabled() && g_config.workspaceSwitch && *g_config.workspaceSwitch;
+    return enabled() && configInt("workspace_switch", 0);
 }
 
 bool syncHyprlandEnabled() {
-    return enabled() && (!g_config.syncHyprland || *g_config.syncHyprland);
+    return enabled() && configInt("sync_hyprland", 1);
 }
 
 std::string effectName() {
-    const std::string configured = g_config.effect ? trim(*g_config.effect) : "";
-    return configured.empty() ? "fade" : configured;
+    return configString("effect", "fade");
 }
 
 std::filesystem::path shadersDir() {
-    const std::string configured = g_config.shadersDir ? trim(*g_config.shadersDir) : "";
-    return configured.empty() ? std::filesystem::path{DEFAULT_SHADERS} : std::filesystem::path{configured};
+    return std::filesystem::path{configString("shaders_dir", DEFAULT_SHADERS)};
 }
 
 std::string kindName(EAnimationKind kind) {

@@ -215,6 +215,8 @@ CAnimationShader* shaderFor(EAnimationKind kind);
 void clearShaderCache();
 
 CBox scaledGeometry(const CBox& logicalBox, PHLMONITOR monitor);
+CBox expandedWindowGeometry(const CBox& logicalBox, PHLWINDOW window);
+CBox expandedScaledGeometry(const CBox& logicalBox, PHLMONITOR monitor, PHLWINDOW window);
 bool ensureFramebuffer(CFramebuffer& fb, const Vector2D& size, DRMFormat format);
 CRegion animationDamageForGeometry(const CBox& geometryPx, const Vector2D& monitorSize);
 void damageAnimationGeometry(PHLMONITOR monitor, const CBox& geometryPx);

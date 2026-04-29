@@ -551,11 +551,12 @@ void renderAnimatedSnapshot(void* thisptr, PHLWINDOW window) {
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(std::move(data)));
     }
 
-    const CBox geometryPx =
-        scaledGeometry(CBox{window->m_realPosition->value().x, window->m_realPosition->value().y, window->m_realSize->value().x, window->m_realSize->value().y}, monitor);
-    const CBox sourceGeometryPx =
-        CBox{window->m_originalClosedPos.x * monitor->m_scale, window->m_originalClosedPos.y * monitor->m_scale, window->m_originalClosedSize.x * monitor->m_scale,
-             window->m_originalClosedSize.y * monitor->m_scale};
+    const CBox logicalGeometry = {window->m_realPosition->value().x, window->m_realPosition->value().y, window->m_realSize->value().x, window->m_realSize->value().y};
+    const CBox geometryPx      = expandedScaledGeometry(logicalGeometry, monitor, window);
+    const CBox sourceGeometryPx = expandedWindowGeometry(CBox{window->m_originalClosedPos.x, window->m_originalClosedPos.y, window->m_originalClosedSize.x,
+                                                              window->m_originalClosedSize.y},
+                                                         window)
+                                      .scale(monitor->m_scale);
     const CRegion damage = animationDamageForGeometry(geometryPx, monitor->m_transformedSize);
     if (damage.empty()) {
         finishShaderClose(window);

@@ -228,6 +228,18 @@ CBox scaledGeometry(const CBox& logicalBox, PHLMONITOR monitor) {
     return logicalBox.copy().translate(-monitor->m_position).scale(monitor->m_scale);
 }
 
+CBox expandedWindowGeometry(const CBox& logicalBox, PHLWINDOW window) {
+    const double borderSize = std::max(window ? window->getRealBorderSize() : 0, 0);
+    if (borderSize <= 0.0)
+        return logicalBox;
+
+    return logicalBox.copy().expand(borderSize);
+}
+
+CBox expandedScaledGeometry(const CBox& logicalBox, PHLMONITOR monitor, PHLWINDOW window) {
+    return scaledGeometry(expandedWindowGeometry(logicalBox, window), monitor);
+}
+
 bool ensureFramebuffer(CFramebuffer& fb, const Vector2D& size, DRMFormat format) {
     if (size.x <= 0 || size.y <= 0)
         return false;

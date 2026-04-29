@@ -25,8 +25,5 @@ pkg_check_modules(
   wayland-server)
 
 target_link_libraries(hypranimated PRIVATE PkgConfig::deps EGL GLESv2 rt)
-target_link_options(
-  hypranimated
-  PRIVATE -Wl,-Bsymbolic-functions
-          -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hypranimated.exports.map)
+target_link_options(hypranimated PRIVATE -Wl,-Bsymbolic-functions)
 install(TARGETS hypranimated)

@@ -26,7 +26,7 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
     m_cfg      = m_workspaceSwitch ? m_workspaceSwitch->cfg : effectConfig();
     m_shader   = shaderFor(m_kind);
     m_monitor  = renderData->pMonitor;
-    m_geometry = scaledGeometry(CBox{renderData->pos.x, renderData->pos.y, renderData->w, renderData->h}, monitor);
+    m_geometry = expandedScaledGeometry(CBox{renderData->pos.x, renderData->pos.y, renderData->w, renderData->h}, monitor, m_window.lock());
 
     if (animationComplete()) {
         m_done = true;
