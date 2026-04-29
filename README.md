@@ -2,9 +2,9 @@
 
 > Development status: this plugin is under active development and is highly unstable. Hyprland plugin ABI changes and rendering-hook behavior can break it or crash the compositor, so use it only if you are comfortable rebuilding and debugging after Hyprland updates.
 
-Hyprland plugin that applies the GLSL shaders in `jpOSh/shaders` to window open and close animations.
+Hyprland plugin that applies the GLSL shaders in a defined directory, for instance `jpOSh/shaders` to window open and close animations.
 
-This plugin is built against the installed Hyprland headers and checks Hyprland's plugin ABI hash at load time. Rebuild it after every Hyprland upgrade.
+This plugin is built against the installed Hyprland headers and checks Hyprland's plugin ABI hash at load time. Rebuild it after every Hyprland upgrade. This has been tested on hyprland 0.54.3
 
 The plugin accepts these Hyprland config values:
 
@@ -31,6 +31,6 @@ The shader wrapper provides:
 
 Set `duration_ms = 0` to use an effect directory's `config` file `duration-ms`; otherwise the Hyprland config value overrides it. Run `make` from this directory, then reload the plugin or restart Hyprland.
 
-`workspace_switch = true` disables Hyprland's normal workspace slide animations at runtime and replaces them with per-window workspace transitions. Each mapped, non-pinned window on the old workspace is rendered through `close.glsl`, and each mapped, non-pinned window on the new workspace is rendered through `open.glsl`. These windows share one workspace-switch timeline and seed, using monitor-centered coordinates so effects like smoke originate from the center of the screen without animating layer surfaces such as Waybar. Empty workspaces do not trigger a shader effect.
+`workspace_switch = true` ideally disables Hyprland's normal workspace animations at runtime and replaces them with per-window workspace transitions. Each mapped, non-pinned window on the old workspace is rendered through `close.glsl`, and each mapped, non-pinned window on the new workspace is rendered through `open.glsl`. These windows share one workspace-switch timeline and seed, using monitor-centered coordinates so effects like smoke originate from the center of the screen without animating layer surfaces such as Waybar. Empty workspaces do not trigger a shader effect. This is a work in progress and does not currently function as intended.
 
-`sync_hyprland = true` makes Hyprland's `windowsMove` animation use the same duration as `duration_ms`, so tiled resize/move animations stay in time with the shader.
+`sync_hyprland = true` makes Hyprland's `windowsMove` animation use the same duration as `duration_ms`, so tiled resize/move animations stay in time with the shader window animations.
