@@ -3,6 +3,8 @@
 namespace hypranimated {
 namespace {
 
+SMonitorShaderState& monitorShaderState(PHLMONITOR monitor);
+
 void backupAnimationConfig(const std::string& name, SP<Hyprutils::Animation::SAnimationPropertyConfig> node) {
     if (!node || g_animationBackups.contains(name))
         return;
@@ -88,6 +90,13 @@ void restoreWorkspaceSwitchState(const SP<SWorkspaceSwitchRenderState>& state) {
         restoreForcedWorkspace(fromWorkspace, state->previousForceRendering);
 
     state->restored = true;
+}
+
+void rememberActiveWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace) {
+    if (!monitor || !workspace)
+        return;
+
+    monitorShaderState(monitor).activeWorkspace = workspace;
 }
 
 void restorePendingWorkspaceSwitchForMonitor(MONITORID monitorId) {
@@ -306,7 +315,44 @@ void finishShaderClose(PHLWINDOW window) {
     g_pHyprRenderer->damageWindow(window, true);
 }
 
+bool commitDeferredWorkspaceChange(const SP<SWorkspaceSwitchRenderState>& state) {
+    if (!state || !state->commitWorkspaceOnFirstFrame || state->workspaceCommitted)
+        return true;
+
+    const auto monitor     = state->monitor.lock();
+    const auto toWorkspace = state->toWorkspace.lock();
+    if (!monitor || !toWorkspace) {
+        state->finished = true;
+        return false;
+    }
+
+    state->workspaceCommitted = true;
+    state->startedAt          = std::chrono::steady_clock::now();
+
+    g_deferredWorkspaceCommitMonitors.insert(monitor->m_id);
+    if (monitor->m_activeWorkspace.get() != toWorkspace.get())
+        callOriginalChangeWorkspace(monitor.get(), toWorkspace, state->commitInternal, state->commitNoMouseMove, state->commitNoFocus);
+    g_deferredWorkspaceCommitMonitors.erase(monitor->m_id);
+
+    rememberActiveWorkspace(monitor, toWorkspace);
+    forceWorkspaceInstant(toWorkspace, true);
+    if (const auto fromWorkspace = state->fromWorkspace.lock()) {
+        forceWorkspaceInstant(fromWorkspace, true);
+        fromWorkspace->m_forceRendering = true;
+    }
+
+    g_pHyprRenderer->damageMonitor(monitor);
+    return true;
+}
+
 } // namespace
+
+bool workspaceHasAnimatableWindows(PHLWORKSPACE workspace) {
+    if (!g_pCompositor || !workspace)
+        return false;
+
+    return std::ranges::any_of(g_pCompositor->m_windows, [&](const auto& window) { return canAnimateWorkspaceWindow(window, workspace); });
+}
 
 void restoreAnimationConfigs() {
     for (auto& [_, backup] : g_animationBackups) {
@@ -333,6 +379,7 @@ void finishAllWorkspaceSwitches() {
 
     g_workspaceSwitches.clear();
     restorePendingWorkspaceSwitches();
+    g_deferredWorkspaceCommitMonitors.clear();
 }
 
 void rememberActiveWorkspacesForAllMonitors() {
@@ -357,15 +404,19 @@ PHLWORKSPACE rememberedActiveWorkspace(PHLMONITOR monitor) {
     return nullptr;
 }
 
-void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride, bool forceSameWorkspace) {
+SP<SWorkspaceSwitchRenderState> startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride, bool forceSameWorkspace,
+                                                              bool updateRememberedWorkspace) {
     if (!workspaceSwitchEnabled() || !workspace || workspace->m_isSpecialWorkspace)
-        return;
+        return {};
 
     sweepAnimations();
 
     const auto monitor = workspace->m_monitor.lock();
     if (!monitor || monitor->isMirror())
-        return;
+        return {};
+
+    if (g_deferredWorkspaceCommitMonitors.contains(monitor->m_id))
+        return {};
 
     auto& state = monitorShaderState(monitor);
     std::optional<bool> pendingPreviousForceRendering;
@@ -381,7 +432,8 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     }
 
     auto fromWorkspace     = fromWorkspaceOverride ? fromWorkspaceOverride : (pendingFromWorkspace ? pendingFromWorkspace : state.activeWorkspace.lock());
-    state.activeWorkspace  = workspace;
+    if (updateRememberedWorkspace)
+        state.activeWorkspace = workspace;
     const bool sameWorkspace = fromWorkspace && fromWorkspace.get() == workspace.get();
     auto restorePendingFromWorkspace = [&]() {
         if (pendingPreviousForceRendering && fromWorkspace)
@@ -390,7 +442,7 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
 
     if (sameWorkspace && !forceSameWorkspace) {
         restorePendingFromWorkspace();
-        return;
+        return {};
     }
     if (sameWorkspace)
         fromWorkspace.reset();
@@ -412,7 +464,7 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     if (destinationEmpty) {
         if (!fromWorkspace || !shaderFileAvailable(EAnimationKind::CLOSE)) {
             restorePendingFromWorkspace();
-            return;
+            return {};
         }
 
         kind             = EAnimationKind::CLOSE;
@@ -425,12 +477,12 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
         }
     } else if (!shaderFileAvailable(EAnimationKind::OPEN)) {
         restorePendingFromWorkspace();
-        return;
+        return {};
     }
 
     if (windows.empty() || workspaceSwitchFor(monitor, workspace, kind)) {
         restorePendingFromWorkspace();
-        return;
+        return {};
     }
 
     // Workspace switches queue each captured window for post-window shader rendering.
@@ -465,11 +517,13 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
 
     if (attached == 0) {
         restoreWorkspaceSwitchState(switchState);
-        return;
+        return {};
     }
 
+    auto result = switchState;
     g_workspaceSwitches.emplace_back(std::move(switchState));
     g_pHyprRenderer->damageMonitor(monitor);
+    return result;
 }
 
 void sweepWorkspaceSwitches() {
@@ -477,7 +531,8 @@ void sweepWorkspaceSwitches() {
         if (!state)
             continue;
 
-        if (state->kind != EAnimationKind::OPEN && elapsedProgress(state->startedAt, state->cfg) >= 1.F)
+        const bool waitingForDeferredCommit = state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted;
+        if (state->kind != EAnimationKind::OPEN && !waitingForDeferredCommit && elapsedProgress(state->startedAt, state->cfg) >= 1.F)
             state->finished = true;
 
         if (state->finished)
@@ -512,12 +567,15 @@ void renderWorkspaceSwitchForCurrentMonitor() {
 
         auto* shader = shaderFor(state->kind);
         if (!shader) {
+            if (state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted)
+                commitDeferredWorkspaceChange(state);
             state->finished = true;
             restoreWorkspaceSwitchState(state);
             continue;
         }
 
-        const float rawProgress = elapsedProgress(state->startedAt, state->cfg);
+        const bool  waitingForDeferredCommit = state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted;
+        const float rawProgress = waitingForDeferredCommit ? 0.F : elapsedProgress(state->startedAt, state->cfg);
         const bool  finalOpeningFrame = state->kind == EAnimationKind::OPEN && rawProgress >= 1.F;
         if (rawProgress >= 1.F && !finalOpeningFrame) {
             state->finished = true;
@@ -533,21 +591,33 @@ void renderWorkspaceSwitchForCurrentMonitor() {
 
         if (!damage.empty()) {
             for (auto const& item : state->renderItems) {
-                if (!item.renderTarget || !item.renderTarget->sourceFramebuffer.getTexture())
+                if (!item.renderTarget)
                     continue;
 
                 if (item.blurAlpha > 0.001F && !item.damage.empty())
                     g_pHyprRenderer->m_renderPass.add(
                         makeAnimatedBlurPassElement(item.geometryPx, monitorSize, item.blurAlpha, item.blurRound, item.blurRoundingPower, item.damage));
 
-                g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(item.renderTarget->sourceFramebuffer.getTexture(), shader, geometryPx, geometryPx,
-                                                                                monitorSize, progress, state->seed, 1.F, damage));
+                if (state->kind == EAnimationKind::CLOSE) {
+                    // Close frames can be the first users of this capture FB; sample it after the queued bind/surface passes populate it.
+                    g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(&item.renderTarget->sourceFramebuffer, shader, geometryPx, geometryPx, monitorSize,
+                                                                                    progress, state->seed, 1.F, damage));
+                } else if (item.renderTarget->sourceFramebuffer.getTexture()) {
+                    g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(item.renderTarget->sourceFramebuffer.getTexture(), shader, geometryPx, geometryPx,
+                                                                                    monitorSize, progress, state->seed, 1.F, damage));
+                } else {
+                    continue;
+                }
+
                 rendered = true;
             }
         }
 
         if (rendered)
             damageAnimationGeometry(monitor, geometryPx);
+
+        if (rendered && state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted && !commitDeferredWorkspaceChange(state))
+            continue;
 
         state->sourceCaptured = false;
         state->renderItems.clear();
@@ -885,6 +955,7 @@ void destroyPluginState() {
     g_pendingWorkspaceSwitchFrom.clear();
     g_pendingWorkspaceForceRendering.clear();
     g_workspaceSwitches.clear();
+    g_deferredWorkspaceCommitMonitors.clear();
     g_listeners.clear();
 
     clearShaderCache();

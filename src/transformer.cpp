@@ -222,22 +222,34 @@ CFramebuffer* CWindowShaderTransformer::transparentHandoffFramebuffer(PHLMONITOR
 }
 
 float CWindowShaderTransformer::rawAnimationProgress() {
-    if (m_workspaceSwitch)
+    if (m_workspaceSwitch) {
+        if (m_workspaceSwitch->commitWorkspaceOnFirstFrame && !m_workspaceSwitch->workspaceCommitted)
+            return 0.F;
+
         return elapsedProgress(m_workspaceSwitch->startedAt, m_workspaceSwitch->cfg);
+    }
 
     return elapsedProgress(m_startedAt, m_cfg);
 }
 
 bool CWindowShaderTransformer::animationComplete() {
-    if (m_workspaceSwitch)
+    if (m_workspaceSwitch) {
+        if (m_workspaceSwitch->commitWorkspaceOnFirstFrame && !m_workspaceSwitch->workspaceCommitted)
+            return m_workspaceSwitch->finished;
+
         return m_workspaceSwitch->finished || elapsedProgress(m_workspaceSwitch->startedAt, m_workspaceSwitch->cfg) >= 1.F;
+    }
 
     return m_startedAt && elapsedProgress(*m_startedAt, m_cfg) >= 1.F;
 }
 
 bool CWindowShaderTransformer::animationCompleteByClock() const {
-    if (m_workspaceSwitch)
+    if (m_workspaceSwitch) {
+        if (m_workspaceSwitch->commitWorkspaceOnFirstFrame && !m_workspaceSwitch->workspaceCommitted)
+            return m_workspaceSwitch->finished;
+
         return m_workspaceSwitch->finished || elapsedProgress(m_workspaceSwitch->startedAt, m_workspaceSwitch->cfg) >= 1.F;
+    }
 
     return m_startedAt && elapsedProgress(*m_startedAt, m_cfg) >= 1.F;
 }

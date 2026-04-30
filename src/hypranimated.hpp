@@ -124,6 +124,11 @@ struct SWorkspaceSwitchRenderState {
     EAnimationKind                         kind                  = EAnimationKind::OPEN;
     float                                 seed                  = 0.F;
     bool                                  previousForceRendering = false;
+    bool                                  commitWorkspaceOnFirstFrame = false;
+    bool                                  workspaceCommitted          = false;
+    bool                                  commitInternal             = false;
+    bool                                  commitNoMouseMove          = false;
+    bool                                  commitNoFocus              = false;
     bool                                  sourceCaptured         = false;
     bool                                  finished              = false;
     bool                                  restored              = false;
@@ -152,6 +157,7 @@ extern HANDLE PHANDLE;
 extern CFunctionHook* g_pRenderSnapshotHook;
 extern CFunctionHook* g_pStartWindowAnimationHook;
 extern CFunctionHook* g_pStartWorkspaceAnimationHook;
+extern CFunctionHook* g_pChangeWorkspaceHook;
 extern bool g_unloading;
 
 extern SConfig g_config;
@@ -162,6 +168,7 @@ extern std::unordered_map<MONITORID, UP<SMonitorShaderState>> g_monitorShaderSta
 extern std::unordered_map<MONITORID, PHLWORKSPACEREF> g_pendingWorkspaceSwitchFrom;
 extern std::unordered_map<MONITORID, bool> g_pendingWorkspaceForceRendering;
 extern std::vector<SP<SWorkspaceSwitchRenderState>> g_workspaceSwitches;
+extern std::unordered_set<MONITORID> g_deferredWorkspaceCommitMonitors;
 extern std::unordered_set<IWindowTransformer*> g_animatedTransformers;
 extern std::unordered_map<std::string, SAnimationConfigBackup> g_animationBackups;
 extern bool g_reloadShaders;
@@ -209,6 +216,7 @@ CFunctionHook* hook(void* target, const std::string& signature, void* handler);
 void callOriginalRenderSnapshot(void* thisptr, PHLWINDOW window);
 void callOriginalStartWindowAnimation(void* thisptr, PHLWINDOW window, CDesktopAnimationManager::eAnimationType type, bool force);
 void callOriginalStartWorkspaceAnimation(void* thisptr, PHLWORKSPACE workspace, CDesktopAnimationManager::eAnimationType type, bool left, bool instant);
+void callOriginalChangeWorkspace(void* thisptr, const PHLWORKSPACE& workspace, bool internal, bool noMouseMove, bool noFocus);
 
 class CAnimationShader {
   public:
@@ -296,7 +304,9 @@ void restoreAnimationConfigs();
 void finishAllWorkspaceSwitches();
 void rememberActiveWorkspacesForAllMonitors();
 PHLWORKSPACE rememberedActiveWorkspace(PHLMONITOR monitor);
-void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride = nullptr, bool forceSameWorkspace = false);
+bool workspaceHasAnimatableWindows(PHLWORKSPACE workspace);
+SP<SWorkspaceSwitchRenderState> startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride = nullptr,
+                                                              bool forceSameWorkspace = false, bool updateRememberedWorkspace = true);
 void sweepWorkspaceSwitches();
 void renderWorkspaceSwitchForCurrentMonitor();
 void renderQueuedClosingAnimationsForCurrentMonitor();
@@ -316,5 +326,6 @@ void destroyPluginState();
 void hkRenderSnapshot(void* thisptr, PHLWINDOW window);
 void hkStartWindowAnimation(void* thisptr, PHLWINDOW window, CDesktopAnimationManager::eAnimationType type, bool force);
 void hkStartWorkspaceAnimation(void* thisptr, PHLWORKSPACE workspace, CDesktopAnimationManager::eAnimationType type, bool left, bool instant);
+void hkChangeWorkspace(void* thisptr, const PHLWORKSPACE& workspace, bool internal, bool noMouseMove, bool noFocus);
 
 } // namespace hypranimated

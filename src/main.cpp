@@ -70,7 +70,15 @@ PLUGIN_DESCRIPTION_INFO pluginInitImpl(HANDLE handle) {
             pmfAddress(static_cast<void (CDesktopAnimationManager::*)(PHLWORKSPACE, CDesktopAnimationManager::eAnimationType, bool, bool)>(&CDesktopAnimationManager::startAnimation)),
             "_ZN24CDesktopAnimationManager14startAnimationEN9Hyprutils6Memory14CSharedPointerI10CWorkspaceEENS_14eAnimationTypeEbb",
             reinterpret_cast<void*>(&hkStartWorkspaceAnimation));
+        g_pChangeWorkspaceHook = hook(
+            pmfAddress(static_cast<void (CMonitor::*)(const PHLWORKSPACE&, bool, bool, bool)>(&CMonitor::changeWorkspace)),
+            "_ZN8CMonitor15changeWorkspaceERKN9Hyprutils6Memory14CSharedPointerI10CWorkspaceEEbbb",
+            reinterpret_cast<void*>(&hkChangeWorkspace));
     } catch (const std::exception& e) {
+        if (g_pChangeWorkspaceHook) {
+            HyprlandAPI::removeFunctionHook(PHANDLE, g_pChangeWorkspaceHook);
+            g_pChangeWorkspaceHook = nullptr;
+        }
         if (g_pStartWorkspaceAnimationHook) {
             HyprlandAPI::removeFunctionHook(PHANDLE, g_pStartWorkspaceAnimationHook);
             g_pStartWorkspaceAnimationHook = nullptr;
@@ -92,6 +100,11 @@ PLUGIN_DESCRIPTION_INFO pluginInitImpl(HANDLE handle) {
 }
 
 void pluginExitImpl() {
+    if (g_pChangeWorkspaceHook) {
+        HyprlandAPI::removeFunctionHook(PHANDLE, g_pChangeWorkspaceHook);
+        g_pChangeWorkspaceHook = nullptr;
+    }
+
     if (g_pStartWorkspaceAnimationHook) {
         HyprlandAPI::removeFunctionHook(PHANDLE, g_pStartWorkspaceAnimationHook);
         g_pStartWorkspaceAnimationHook = nullptr;
