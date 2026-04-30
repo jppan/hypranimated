@@ -92,8 +92,10 @@ void hkStartWorkspaceAnimation(void* thisptr, PHLWORKSPACE workspace, CDesktopAn
 
     if (type == CDesktopAnimationManager::ANIMATION_TYPE_OUT) {
         g_pendingWorkspaceSwitchFrom[monitor->m_id] = PHLWORKSPACEREF{workspace};
+        g_pendingWorkspaceForceRendering[monitor->m_id] = workspace->m_forceRendering;
+        workspace->m_forceRendering = true;
         workspace->m_renderOffset->setValueAndWarp(Vector2D{0.F, 0.F});
-        workspace->m_alpha->setValueAndWarp(0.F);
+        workspace->m_alpha->setValueAndWarp(1.F);
         g_pHyprRenderer->damageMonitor(monitor);
         return;
     }

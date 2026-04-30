@@ -160,6 +160,7 @@ extern std::unordered_map<uintptr_t, SClosingAnimation> g_closing;
 extern std::vector<SQueuedClosingRender> g_queuedClosingRenders;
 extern std::unordered_map<MONITORID, UP<SMonitorShaderState>> g_monitorShaderStates;
 extern std::unordered_map<MONITORID, PHLWORKSPACEREF> g_pendingWorkspaceSwitchFrom;
+extern std::unordered_map<MONITORID, bool> g_pendingWorkspaceForceRendering;
 extern std::vector<SP<SWorkspaceSwitchRenderState>> g_workspaceSwitches;
 extern std::unordered_set<IWindowTransformer*> g_animatedTransformers;
 extern std::unordered_map<std::string, SAnimationConfigBackup> g_animationBackups;
@@ -284,6 +285,7 @@ class CWindowShaderTransformer : public IWindowTransformer {
     float                                                    m_outputAlpha = 1.F;
 
     CFramebuffer* clearPassthroughFramebuffer(PHLMONITOR monitor);
+    CFramebuffer* transparentHandoffFramebuffer(PHLMONITOR monitor, CFramebuffer* fallback);
     float rawAnimationProgress();
     bool animationComplete();
     bool animationCompleteByClock() const;

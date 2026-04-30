@@ -71,17 +71,55 @@ void disableWorkspaceSlideAnimations() {
 
 void forceWorkspaceInstant(PHLWORKSPACE workspace, bool visible);
 
+void restoreForcedWorkspace(PHLWORKSPACE workspace, bool forceRendering) {
+    if (!workspace || workspace->inert())
+        return;
+
+    workspace->m_forceRendering = forceRendering;
+    if (!workspace->isVisible())
+        forceWorkspaceInstant(workspace, false);
+}
+
 void restoreWorkspaceSwitchState(const SP<SWorkspaceSwitchRenderState>& state) {
     if (!state || state->restored)
         return;
 
-    if (const auto fromWorkspace = state->fromWorkspace.lock(); fromWorkspace && !fromWorkspace->inert()) {
-        fromWorkspace->m_forceRendering = state->previousForceRendering;
-        if (!fromWorkspace->isVisible())
-            forceWorkspaceInstant(fromWorkspace, false);
-    }
+    if (const auto fromWorkspace = state->fromWorkspace.lock())
+        restoreForcedWorkspace(fromWorkspace, state->previousForceRendering);
 
     state->restored = true;
+}
+
+void restorePendingWorkspaceSwitchForMonitor(MONITORID monitorId) {
+    std::optional<bool> pendingForceRendering;
+    if (auto it = g_pendingWorkspaceForceRendering.find(monitorId); it != g_pendingWorkspaceForceRendering.end()) {
+        pendingForceRendering = it->second;
+        g_pendingWorkspaceForceRendering.erase(it);
+    }
+
+    if (auto it = g_pendingWorkspaceSwitchFrom.find(monitorId); it != g_pendingWorkspaceSwitchFrom.end()) {
+        if (pendingForceRendering) {
+            if (const auto pendingWorkspace = it->second.lock())
+                restoreForcedWorkspace(pendingWorkspace, *pendingForceRendering);
+        }
+
+        g_pendingWorkspaceSwitchFrom.erase(it);
+    }
+}
+
+void restorePendingWorkspaceSwitches() {
+    std::vector<MONITORID> monitorIds;
+    monitorIds.reserve(g_pendingWorkspaceSwitchFrom.size());
+    for (const auto& [monitorId, _] : g_pendingWorkspaceSwitchFrom) {
+        monitorIds.emplace_back(monitorId);
+    }
+
+    for (const auto monitorId : monitorIds) {
+        restorePendingWorkspaceSwitchForMonitor(monitorId);
+    }
+
+    g_pendingWorkspaceSwitchFrom.clear();
+    g_pendingWorkspaceForceRendering.clear();
 }
 
 SMonitorShaderState& monitorShaderState(PHLMONITOR monitor) {
@@ -139,6 +177,8 @@ bool shouldBlurWindow(PHLWINDOW window) {
 void cancelWorkspaceSwitchesForMonitor(PHLMONITOR monitor) {
     if (!monitor)
         return;
+
+    restorePendingWorkspaceSwitchForMonitor(monitor->m_id);
 
     for (auto& state : g_workspaceSwitches) {
         const auto stateMonitor = state ? state->monitor.lock() : nullptr;
@@ -292,6 +332,7 @@ void finishAllWorkspaceSwitches() {
     }
 
     g_workspaceSwitches.clear();
+    restorePendingWorkspaceSwitches();
 }
 
 void rememberActiveWorkspacesForAllMonitors() {
@@ -327,11 +368,30 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
         return;
 
     auto& state = monitorShaderState(monitor);
-    auto fromWorkspace     = fromWorkspaceOverride ? fromWorkspaceOverride : state.activeWorkspace.lock();
+    std::optional<bool> pendingPreviousForceRendering;
+    if (auto it = g_pendingWorkspaceForceRendering.find(monitor->m_id); it != g_pendingWorkspaceForceRendering.end()) {
+        pendingPreviousForceRendering = it->second;
+        g_pendingWorkspaceForceRendering.erase(it);
+    }
+
+    PHLWORKSPACE pendingFromWorkspace = nullptr;
+    if (auto it = g_pendingWorkspaceSwitchFrom.find(monitor->m_id); it != g_pendingWorkspaceSwitchFrom.end()) {
+        pendingFromWorkspace = it->second.lock();
+        g_pendingWorkspaceSwitchFrom.erase(it);
+    }
+
+    auto fromWorkspace     = fromWorkspaceOverride ? fromWorkspaceOverride : (pendingFromWorkspace ? pendingFromWorkspace : state.activeWorkspace.lock());
     state.activeWorkspace  = workspace;
     const bool sameWorkspace = fromWorkspace && fromWorkspace.get() == workspace.get();
-    if (sameWorkspace && !forceSameWorkspace)
+    auto restorePendingFromWorkspace = [&]() {
+        if (pendingPreviousForceRendering && fromWorkspace)
+            restoreForcedWorkspace(fromWorkspace, *pendingPreviousForceRendering);
+    };
+
+    if (sameWorkspace && !forceSameWorkspace) {
+        restorePendingFromWorkspace();
         return;
+    }
     if (sameWorkspace)
         fromWorkspace.reset();
 
@@ -350,8 +410,10 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     PHLWORKSPACE   captureWorkspace = workspace;
     const bool     destinationEmpty = windows.empty();
     if (destinationEmpty) {
-        if (!fromWorkspace || !shaderFileAvailable(EAnimationKind::CLOSE))
+        if (!fromWorkspace || !shaderFileAvailable(EAnimationKind::CLOSE)) {
+            restorePendingFromWorkspace();
             return;
+        }
 
         kind             = EAnimationKind::CLOSE;
         captureWorkspace = fromWorkspace;
@@ -362,19 +424,24 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
             }
         }
     } else if (!shaderFileAvailable(EAnimationKind::OPEN)) {
+        restorePendingFromWorkspace();
         return;
     }
 
-    if (windows.empty() || workspaceSwitchFor(monitor, workspace, kind))
+    if (windows.empty() || workspaceSwitchFor(monitor, workspace, kind)) {
+        restorePendingFromWorkspace();
         return;
+    }
 
     // Workspace switches queue each captured window for post-window shader rendering.
-    const bool previousForceRendering = fromWorkspace ? fromWorkspace->m_forceRendering : false;
+    const bool previousForceRendering = pendingPreviousForceRendering.value_or(fromWorkspace ? fromWorkspace->m_forceRendering : false);
     cancelWorkspaceSwitchesForMonitor(monitor);
     forceWorkspaceInstant(workspace, true);
     if (kind == EAnimationKind::CLOSE && captureWorkspace) {
         forceWorkspaceInstant(captureWorkspace, true);
         captureWorkspace->m_forceRendering = true;
+    } else {
+        restorePendingFromWorkspace();
     }
 
     const auto fromWorkspaceId = fromWorkspace ? fromWorkspace->m_id : WORKSPACE_INVALID;
@@ -410,7 +477,7 @@ void sweepWorkspaceSwitches() {
         if (!state)
             continue;
 
-        if (elapsedProgress(state->startedAt, state->cfg) >= 1.F)
+        if (state->kind != EAnimationKind::OPEN && elapsedProgress(state->startedAt, state->cfg) >= 1.F)
             state->finished = true;
 
         if (state->finished)
@@ -451,7 +518,8 @@ void renderWorkspaceSwitchForCurrentMonitor() {
         }
 
         const float rawProgress = elapsedProgress(state->startedAt, state->cfg);
-        if (rawProgress >= 1.F) {
+        const bool  finalOpeningFrame = state->kind == EAnimationKind::OPEN && rawProgress >= 1.F;
+        if (rawProgress >= 1.F && !finalOpeningFrame) {
             state->finished = true;
             restoreWorkspaceSwitchState(state);
             continue;
@@ -483,6 +551,11 @@ void renderWorkspaceSwitchForCurrentMonitor() {
 
         state->sourceCaptured = false;
         state->renderItems.clear();
+
+        if (finalOpeningFrame) {
+            state->finished = true;
+            restoreWorkspaceSwitchState(state);
+        }
     }
 
     rememberActiveWorkspaceForCurrentMonitor();
@@ -810,6 +883,7 @@ void destroyPluginState() {
     g_queuedClosingRenders.clear();
     g_monitorShaderStates.clear();
     g_pendingWorkspaceSwitchFrom.clear();
+    g_pendingWorkspaceForceRendering.clear();
     g_workspaceSwitches.clear();
     g_listeners.clear();
 

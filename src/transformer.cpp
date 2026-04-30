@@ -33,10 +33,9 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
     m_blurRoundingPower = renderData->roundingPower;
     m_outputAlpha       = std::clamp(renderData->alpha * renderData->fadeAlpha, 0.F, 1.F);
 
-    if (animationComplete()) {
+    if (m_workspaceSwitch && (m_workspaceSwitch->finished || (m_kind != EAnimationKind::OPEN && animationComplete()))) {
         m_done = true;
-        if (m_workspaceSwitch)
-            m_workspaceSwitch->finished = true;
+        m_workspaceSwitch->finished = true;
         return;
     }
 
@@ -91,16 +90,14 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
 
     if (m_workspaceSwitch && m_workspaceSwitch->finished) {
         m_done = true;
-        return in;
+        return transparentHandoffFramebuffer(monitor, in);
     }
 
     const float rawProgress = rawAnimationProgress();
-    if (rawProgress >= 1.F) {
-        if (m_workspaceSwitch)
-            m_workspaceSwitch->finished = true;
-
+    if (m_workspaceSwitch && m_kind != EAnimationKind::OPEN && rawProgress >= 1.F) {
+        m_workspaceSwitch->finished = true;
         m_done = true;
-        return in;
+        return transparentHandoffFramebuffer(monitor, in);
     }
 
     if (m_workspaceSwitch) {
@@ -127,6 +124,10 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
 
         damageAnimationGeometry(monitor, m_geometry);
         g_pHyprOpenGL->blend(true);
+
+        if (rawProgress >= 1.F)
+            m_done = true;
+
         return passthrough;
     }
 
@@ -156,11 +157,21 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
 
     damageAnimationGeometry(monitor, geometry);
     g_pHyprOpenGL->blend(true);
+
+    if (rawProgress >= 1.F)
+        m_done = true;
+
     return passthrough;
 }
 
 bool CWindowShaderTransformer::done() const {
-    return m_done || !enabled() || !m_window.lock() || animationCompleteByClock();
+    if (m_workspaceSwitch && m_kind == EAnimationKind::OPEN)
+        return m_done || !enabled() || !m_window.lock() || m_workspaceSwitch->finished;
+
+    if (m_workspaceSwitch)
+        return m_done || !enabled() || !m_window.lock() || animationCompleteByClock();
+
+    return m_done || !enabled() || !m_window.lock();
 }
 
 SP<SWorkspaceSwitchRenderState> CWindowShaderTransformer::workspaceSwitch() const {
@@ -195,6 +206,19 @@ CFramebuffer* CWindowShaderTransformer::clearPassthroughFramebuffer(PHLMONITOR m
     g_pHyprOpenGL->m_renderData.currentFB = previousCurrentFB;
     g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, scissorEnabled == GL_TRUE);
     return &passthrough;
+}
+
+CFramebuffer* CWindowShaderTransformer::transparentHandoffFramebuffer(PHLMONITOR monitor, CFramebuffer* fallback) {
+    auto* passthrough = clearPassthroughFramebuffer(monitor);
+    if (passthrough) {
+        g_pHyprOpenGL->blend(true);
+        return passthrough;
+    }
+
+    if (g_pHyprOpenGL)
+        g_pHyprOpenGL->blend(true);
+
+    return fallback;
 }
 
 float CWindowShaderTransformer::rawAnimationProgress() {

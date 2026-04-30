@@ -14,6 +14,7 @@ std::unordered_map<uintptr_t, SClosingAnimation> g_closing;
 std::vector<SQueuedClosingRender> g_queuedClosingRenders;
 std::unordered_map<MONITORID, UP<SMonitorShaderState>> g_monitorShaderStates;
 std::unordered_map<MONITORID, PHLWORKSPACEREF> g_pendingWorkspaceSwitchFrom;
+std::unordered_map<MONITORID, bool> g_pendingWorkspaceForceRendering;
 std::vector<SP<SWorkspaceSwitchRenderState>> g_workspaceSwitches;
 std::unordered_set<IWindowTransformer*> g_animatedTransformers;
 std::unordered_map<std::string, SAnimationConfigBackup> g_animationBackups;
