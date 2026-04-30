@@ -105,21 +105,42 @@ struct SWindowRenderTarget {
     CFramebuffer passthroughFramebuffer;
 };
 
+struct SWorkspaceSwitchRenderItem {
+    SP<SWindowRenderTarget> renderTarget;
+    CBox                    geometryPx;
+    CRegion                 damage;
+    float                   blurAlpha         = 0.F;
+    int                     blurRound         = 0;
+    float                   blurRoundingPower = 2.F;
+};
+
 struct SWorkspaceSwitchRenderState {
     PHLMONITORREF                         monitor;
     PHLWORKSPACEREF                       fromWorkspace;
     PHLWORKSPACEREF                       toWorkspace;
     std::chrono::steady_clock::time_point startedAt;
     SEffectConfig                         cfg;
-    SP<SWindowRenderTarget>               renderTarget;
-    CRegion                               capturedDamage;
+    std::vector<SWorkspaceSwitchRenderItem> renderItems;
     EAnimationKind                         kind                  = EAnimationKind::OPEN;
     float                                 seed                  = 0.F;
     bool                                  previousForceRendering = false;
-    bool                                  sourceCleared          = false;
     bool                                  sourceCaptured         = false;
     bool                                  finished              = false;
     bool                                  restored              = false;
+};
+
+struct SQueuedClosingRender {
+    PHLMONITORREF monitor;
+    SP<CTexture>  texture;
+    CBox          geometryPx;
+    CBox          sourceGeometryPx;
+    CRegion       damage;
+    float         progress          = 0.F;
+    float         seed              = 0.F;
+    float         dimAlpha          = 0.F;
+    float         blurAlpha         = 0.F;
+    int           blurRound         = 0;
+    float         blurRoundingPower = 2.F;
 };
 
 struct SAnimationConfigBackup {
@@ -136,6 +157,7 @@ extern bool g_unloading;
 extern SConfig g_config;
 extern std::vector<Hyprutils::Signal::CHyprSignalListener> g_listeners;
 extern std::unordered_map<uintptr_t, SClosingAnimation> g_closing;
+extern std::vector<SQueuedClosingRender> g_queuedClosingRenders;
 extern std::unordered_map<MONITORID, UP<SMonitorShaderState>> g_monitorShaderStates;
 extern std::unordered_map<MONITORID, PHLWORKSPACEREF> g_pendingWorkspaceSwitchFrom;
 extern std::vector<SP<SWorkspaceSwitchRenderState>> g_workspaceSwitches;
@@ -275,6 +297,7 @@ PHLWORKSPACE rememberedActiveWorkspace(PHLMONITOR monitor);
 void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWorkspaceOverride = nullptr, bool forceSameWorkspace = false);
 void sweepWorkspaceSwitches();
 void renderWorkspaceSwitchForCurrentMonitor();
+void renderQueuedClosingAnimationsForCurrentMonitor();
 void detectWorkspaceSwitchForCurrentMonitor();
 bool hasAnimatedTransformer(PHLWINDOW window);
 void onWindowOpen(PHLWINDOW window);

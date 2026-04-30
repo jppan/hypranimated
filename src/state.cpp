@@ -11,6 +11,7 @@ bool g_unloading = false;
 SConfig g_config;
 std::vector<Hyprutils::Signal::CHyprSignalListener> g_listeners;
 std::unordered_map<uintptr_t, SClosingAnimation> g_closing;
+std::vector<SQueuedClosingRender> g_queuedClosingRenders;
 std::unordered_map<MONITORID, UP<SMonitorShaderState>> g_monitorShaderStates;
 std::unordered_map<MONITORID, PHLWORKSPACEREF> g_pendingWorkspaceSwitchFrom;
 std::vector<SP<SWorkspaceSwitchRenderState>> g_workspaceSwitches;

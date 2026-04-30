@@ -368,7 +368,7 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     if (windows.empty() || workspaceSwitchFor(monitor, workspace, kind))
         return;
 
-    // Workspace switches render eligible windows through one monitor-sized shader pass.
+    // Workspace switches queue each captured window for post-window shader rendering.
     const bool previousForceRendering = fromWorkspace ? fromWorkspace->m_forceRendering : false;
     cancelWorkspaceSwitchesForMonitor(monitor);
     forceWorkspaceInstant(workspace, true);
@@ -386,7 +386,6 @@ void startWorkspaceSwitchAnimation(PHLWORKSPACE workspace, PHLWORKSPACE fromWork
     switchState->toWorkspace            = PHLWORKSPACEREF{workspace};
     switchState->startedAt              = std::chrono::steady_clock::now();
     switchState->cfg                    = effectConfig();
-    switchState->renderTarget           = makeShared<SWindowRenderTarget>();
     switchState->kind                   = kind;
     switchState->seed                   = randomSeed(seedKey, kind);
     switchState->previousForceRendering = previousForceRendering;
@@ -441,15 +440,8 @@ void renderWorkspaceSwitchForCurrentMonitor() {
         if (!state || state->finished || !stateMonitor || stateMonitor->m_id != monitor->m_id)
             continue;
 
-        if (!state->sourceCaptured || !state->renderTarget)
+        if (!state->sourceCaptured || state->renderItems.empty())
             continue;
-
-        if (!state->renderTarget->sourceFramebuffer.getTexture()) {
-            state->sourceCleared  = false;
-            state->sourceCaptured = false;
-            state->capturedDamage.clear();
-            continue;
-        }
 
         auto* shader = shaderFor(state->kind);
         if (!shader) {
@@ -469,18 +461,73 @@ void renderWorkspaceSwitchForCurrentMonitor() {
         const CBox  geometryPx  = {0, 0, monitorSize.x, monitorSize.y};
         const auto  damage      = animationDamageForGeometry(geometryPx, monitorSize);
         const float progress    = ease(rawProgress, state->cfg.curve);
+        bool        rendered    = false;
+
         if (!damage.empty()) {
-            g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(state->renderTarget->sourceFramebuffer.getTexture(), shader, geometryPx, geometryPx,
-                                                                            monitorSize, progress, state->seed, 1.F, damage));
-            damageAnimationGeometry(monitor, geometryPx);
+            for (auto const& item : state->renderItems) {
+                if (!item.renderTarget || !item.renderTarget->sourceFramebuffer.getTexture())
+                    continue;
+
+                if (item.blurAlpha > 0.001F && !item.damage.empty())
+                    g_pHyprRenderer->m_renderPass.add(
+                        makeAnimatedBlurPassElement(item.geometryPx, monitorSize, item.blurAlpha, item.blurRound, item.blurRoundingPower, item.damage));
+
+                g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(item.renderTarget->sourceFramebuffer.getTexture(), shader, geometryPx, geometryPx,
+                                                                                monitorSize, progress, state->seed, 1.F, damage));
+                rendered = true;
+            }
         }
 
-        state->sourceCleared  = false;
+        if (rendered)
+            damageAnimationGeometry(monitor, geometryPx);
+
         state->sourceCaptured = false;
-        state->capturedDamage.clear();
+        state->renderItems.clear();
     }
 
     rememberActiveWorkspaceForCurrentMonitor();
+}
+
+void renderQueuedClosingAnimationsForCurrentMonitor() {
+    if (!g_pHyprOpenGL || !g_pHyprOpenGL->m_renderData.pMonitor)
+        return;
+
+    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    if (!monitor || monitor->isMirror())
+        return;
+
+    auto* shader = shaderFor(EAnimationKind::CLOSE);
+    for (auto it = g_queuedClosingRenders.begin(); it != g_queuedClosingRenders.end();) {
+        const auto itemMonitor = it->monitor.lock();
+        if (!itemMonitor) {
+            it = g_queuedClosingRenders.erase(it);
+            continue;
+        }
+
+        if (itemMonitor->m_id != monitor->m_id) {
+            ++it;
+            continue;
+        }
+
+        if (shader && it->texture && !it->damage.empty()) {
+            if (it->dimAlpha > 0.F) {
+                CRectPassElement::SRectData data;
+                data.box   = {0, 0, monitor->m_pixelSize.x, monitor->m_pixelSize.y};
+                data.color = CHyprColor(0, 0, 0, it->dimAlpha);
+                g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(std::move(data)));
+            }
+
+            if (it->blurAlpha > 0.001F)
+                g_pHyprRenderer->m_renderPass.add(
+                    makeAnimatedBlurPassElement(it->geometryPx, monitor->m_transformedSize, it->blurAlpha, it->blurRound, it->blurRoundingPower, it->damage));
+
+            g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(it->texture, shader, it->geometryPx, it->sourceGeometryPx, monitor->m_transformedSize,
+                                                                            it->progress, it->seed, 1.F, it->damage));
+            damageAnimationGeometry(monitor, it->geometryPx);
+        }
+
+        it = g_queuedClosingRenders.erase(it);
+    }
 }
 
 void detectWorkspaceSwitchForCurrentMonitor() {
@@ -696,12 +743,7 @@ void renderAnimatedSnapshot(void* thisptr, PHLWINDOW window) {
     }
 
     static auto PDIMAROUND = CConfigValue<Hyprlang::FLOAT>("decoration:dim_around");
-    if (*PDIMAROUND && window->m_ruleApplicator->dimAround().valueOrDefault()) {
-        CRectPassElement::SRectData data;
-        data.box   = {0, 0, g_pHyprOpenGL->m_renderData.pMonitor->m_pixelSize.x, g_pHyprOpenGL->m_renderData.pMonitor->m_pixelSize.y};
-        data.color = CHyprColor(0, 0, 0, *PDIMAROUND * (1.F - progress));
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(std::move(data)));
-    }
+    const float dimAlpha = *PDIMAROUND && window->m_ruleApplicator->dimAround().valueOrDefault() ? *PDIMAROUND * (1.F - progress) : 0.F;
 
     const CBox logicalGeometry = {window->m_realPosition->value().x, window->m_realPosition->value().y, window->m_realSize->value().x, window->m_realSize->value().y};
     const CBox geometryPx      = expandedScaledGeometry(logicalGeometry, monitor, window);
@@ -717,14 +759,21 @@ void renderAnimatedSnapshot(void* thisptr, PHLWINDOW window) {
     }
 
     const float blurAlpha = std::clamp(1.F - progress, 0.F, 1.F);
-    if (shouldBlurWindow(window) && blurAlpha > 0.001F) {
-        const int round = std::max(0, static_cast<int>(std::round(window->rounding() * monitor->m_scale)));
-        g_pHyprRenderer->m_renderPass.add(makeAnimatedBlurPassElement(geometryPx, monitor->m_transformedSize, blurAlpha, round, window->roundingPower(), damage));
-    }
-
-    g_pHyprRenderer->m_renderPass.add(makeAnimatedShaderPassElement(fbData->getTexture(), shader, geometryPx, sourceGeometryPx, monitor->m_transformedSize, progress,
-                                                                    it->second.seed, 1.F, damage));
-    damageAnimationGeometry(monitor, geometryPx);
+    const bool  blur      = shouldBlurWindow(window) && blurAlpha > 0.001F;
+    const int   round     = blur ? std::max(0, static_cast<int>(std::round(window->rounding() * monitor->m_scale))) : 0;
+    g_queuedClosingRenders.emplace_back(SQueuedClosingRender{
+        .monitor           = PHLMONITORREF{monitor},
+        .texture           = fbData->getTexture(),
+        .geometryPx        = geometryPx,
+        .sourceGeometryPx  = sourceGeometryPx,
+        .damage            = damage,
+        .progress          = progress,
+        .seed              = it->second.seed,
+        .dimAlpha          = dimAlpha,
+        .blurAlpha         = blur ? blurAlpha : 0.F,
+        .blurRound         = round,
+        .blurRoundingPower = window->roundingPower(),
+    });
 }
 
 void removeAnimatedTransformers() {
@@ -758,6 +807,7 @@ void destroyPluginState() {
     removeAnimatedTransformers();
     g_animatedTransformers.clear();
     g_closing.clear();
+    g_queuedClosingRenders.clear();
     g_monitorShaderStates.clear();
     g_pendingWorkspaceSwitchFrom.clear();
     g_workspaceSwitches.clear();

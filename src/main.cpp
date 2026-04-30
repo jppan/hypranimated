@@ -53,6 +53,7 @@ PLUGIN_DESCRIPTION_INFO pluginInitImpl(HANDLE handle) {
             sweepAnimations();
             sweepWorkspaceSwitches();
             renderWorkspaceSwitchForCurrentMonitor();
+            renderQueuedClosingAnimationsForCurrentMonitor();
         }
     }));
 

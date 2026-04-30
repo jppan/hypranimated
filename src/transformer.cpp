@@ -12,7 +12,7 @@ CWindowShaderTransformer::CWindowShaderTransformer(PHLWINDOW window, EAnimationK
     m_window(window),
     m_kind(kind),
     m_workspaceSwitch(std::move(workspaceSwitch)),
-    m_renderTarget(m_workspaceSwitch ? m_workspaceSwitch->renderTarget : makeShared<SWindowRenderTarget>()),
+    m_renderTarget(makeShared<SWindowRenderTarget>()),
     m_seed(randomSeed(reinterpret_cast<uintptr_t>(window.get()), kind)) {
 }
 
@@ -54,9 +54,7 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
         }
 
         forceCurrentRenderDamage(monitor, damage);
-        m_workspaceSwitch->capturedDamage.add(damage);
-        g_pHyprRenderer->m_renderPass.add(makeBindOffMainPassElement(m_renderTarget, !m_workspaceSwitch->sourceCleared));
-        m_workspaceSwitch->sourceCleared  = true;
+        g_pHyprRenderer->m_renderPass.add(makeBindOffMainPassElement(m_renderTarget));
         m_workspaceSwitch->sourceCaptured = true;
 
         renderData->blur           = false;
@@ -116,8 +114,16 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
         const auto  monitorSize = monitor->m_transformedSize;
         const auto  damage      = animationDamageForGeometry(m_geometry, monitorSize);
         const float blurAlpha   = std::clamp(m_kind == EAnimationKind::OPEN ? progress : 1.F - progress, 0.F, 1.F);
-        if (m_shouldBlur && blurAlpha > 0.001F && !damage.empty())
-            g_pHyprRenderer->m_renderPass.add(makeAnimatedBlurPassElement(m_geometry, monitorSize, blurAlpha, m_blurRound, m_blurRoundingPower, damage));
+        if (!damage.empty()) {
+            m_workspaceSwitch->renderItems.emplace_back(SWorkspaceSwitchRenderItem{
+                .renderTarget       = m_renderTarget,
+                .geometryPx         = m_geometry,
+                .damage             = damage,
+                .blurAlpha          = m_shouldBlur ? blurAlpha : 0.F,
+                .blurRound          = m_blurRound,
+                .blurRoundingPower  = m_blurRoundingPower,
+            });
+        }
 
         damageAnimationGeometry(monitor, m_geometry);
         g_pHyprOpenGL->blend(true);
