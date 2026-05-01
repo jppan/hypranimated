@@ -35,4 +35,15 @@ Set `duration_ms = 0` to use an effect directory's `config` file `duration-ms`; 
 
 `sync_hyprland = true` makes Hyprland's `windowsMove` animation use the same duration as `duration_ms`, so tiled resize/move animations stay in time with the shader window animations.
 
+Feature roadmap:
+
+- [ ] Support Nvidia
+- [ ] Multi monitor support
+
+Known issues:
+
+Flickering on workspace changes whilst screen sharing with xdg-portal-hyprland
+Framebuffer issues/temporary flicker on toggling to an empty workspace
+Fps drops on workspace changes with many windows
+
 Shader credit goes to https://github.com/liixini/shaders.
