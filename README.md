@@ -37,7 +37,7 @@ Set `duration_ms = 0` to use an effect directory's `config` file `duration-ms`; 
 
 Feature roadmap:
 
-- [ ] Support Nvidia
+- [X] Support Nvidia
 - [ ] Multi monitor support
 
 Known issues:
