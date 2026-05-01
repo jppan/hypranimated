@@ -45,5 +45,6 @@ Known issues:
 - Flickering on workspace changes whilst screen sharing with xdg-portal-hyprland
 - Framebuffer issues/temporary flicker on toggling to an empty workspace
 - Fps drops on workspace changes with many windows
+- Inability to focus workspaces that are not persistent unless the initial workspace is empty
 
 Shader credit goes to https://github.com/liixini/shaders.
