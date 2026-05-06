@@ -333,6 +333,7 @@ bool commitDeferredWorkspaceChange(const SP<SWorkspaceSwitchRenderState>& state)
     if (monitor->m_activeWorkspace.get() != toWorkspace.get())
         callOriginalChangeWorkspace(monitor.get(), toWorkspace, state->commitInternal, state->commitNoMouseMove, state->commitNoFocus);
     g_deferredWorkspaceCommitMonitors.erase(monitor->m_id);
+    state->retainedToWorkspace.reset();
 
     rememberActiveWorkspace(monitor, toWorkspace);
     forceWorkspaceInstant(toWorkspace, true);
@@ -531,10 +532,6 @@ void sweepWorkspaceSwitches() {
         if (!state)
             continue;
 
-        const bool waitingForDeferredCommit = state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted;
-        if (state->kind != EAnimationKind::OPEN && !waitingForDeferredCommit && elapsedProgress(state->startedAt, state->cfg) >= 1.F)
-            state->finished = true;
-
         if (state->finished)
             restoreWorkspaceSwitchState(state);
         else if (const auto monitor = state->monitor.lock(); monitor)
@@ -562,9 +559,6 @@ void renderWorkspaceSwitchForCurrentMonitor() {
         if (!state || state->finished || !stateMonitor || stateMonitor->m_id != monitor->m_id)
             continue;
 
-        if (!state->sourceCaptured || state->renderItems.empty())
-            continue;
-
         auto* shader = shaderFor(state->kind);
         if (!shader) {
             if (state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted)
@@ -576,10 +570,12 @@ void renderWorkspaceSwitchForCurrentMonitor() {
 
         const bool  waitingForDeferredCommit = state->commitWorkspaceOnFirstFrame && !state->workspaceCommitted;
         const float rawProgress = waitingForDeferredCommit ? 0.F : elapsedProgress(state->startedAt, state->cfg);
-        const bool  finalOpeningFrame = state->kind == EAnimationKind::OPEN && rawProgress >= 1.F;
-        if (rawProgress >= 1.F && !finalOpeningFrame) {
-            state->finished = true;
-            restoreWorkspaceSwitchState(state);
+        const bool  finalFrame = rawProgress >= 1.F;
+        if (!state->sourceCaptured || state->renderItems.empty()) {
+            if (finalFrame && !waitingForDeferredCommit) {
+                state->finished = true;
+                restoreWorkspaceSwitchState(state);
+            }
             continue;
         }
 
@@ -622,7 +618,7 @@ void renderWorkspaceSwitchForCurrentMonitor() {
         state->sourceCaptured = false;
         state->renderItems.clear();
 
-        if (finalOpeningFrame) {
+        if (finalFrame) {
             state->finished = true;
             restoreWorkspaceSwitchState(state);
         }

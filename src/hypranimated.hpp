@@ -118,6 +118,7 @@ struct SWorkspaceSwitchRenderState {
     PHLMONITORREF                         monitor;
     PHLWORKSPACEREF                       fromWorkspace;
     PHLWORKSPACEREF                       toWorkspace;
+    PHLWORKSPACE                          retainedToWorkspace;
     std::chrono::steady_clock::time_point startedAt;
     SEffectConfig                         cfg;
     std::vector<SWorkspaceSwitchRenderItem> renderItems;
@@ -295,8 +296,6 @@ class CWindowShaderTransformer : public IWindowTransformer {
     CFramebuffer* clearPassthroughFramebuffer(PHLMONITOR monitor);
     CFramebuffer* transparentHandoffFramebuffer(PHLMONITOR monitor, CFramebuffer* fallback);
     float rawAnimationProgress();
-    bool animationComplete();
-    bool animationCompleteByClock() const;
 };
 
 void applyAnimationOverrides();

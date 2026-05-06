@@ -167,6 +167,7 @@ void hkChangeWorkspace(void* thisptr, const PHLWORKSPACE& workspace, bool intern
     }
 
     switchState->commitWorkspaceOnFirstFrame = true;
+    switchState->retainedToWorkspace         = workspace;
     switchState->commitInternal             = internal;
     switchState->commitNoMouseMove          = noMouseMove;
     switchState->commitNoFocus              = noFocus;

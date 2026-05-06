@@ -33,9 +33,8 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
     m_blurRoundingPower = renderData->roundingPower;
     m_outputAlpha       = std::clamp(renderData->alpha * renderData->fadeAlpha, 0.F, 1.F);
 
-    if (m_workspaceSwitch && (m_workspaceSwitch->finished || (m_kind != EAnimationKind::OPEN && animationComplete()))) {
+    if (m_workspaceSwitch && m_workspaceSwitch->finished) {
         m_done = true;
-        m_workspaceSwitch->finished = true;
         return;
     }
 
@@ -94,12 +93,6 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
     }
 
     const float rawProgress = rawAnimationProgress();
-    if (m_workspaceSwitch && m_kind != EAnimationKind::OPEN && rawProgress >= 1.F) {
-        m_workspaceSwitch->finished = true;
-        m_done = true;
-        return transparentHandoffFramebuffer(monitor, in);
-    }
-
     if (m_workspaceSwitch) {
         auto* passthrough = clearPassthroughFramebuffer(monitor);
         if (!passthrough) {
@@ -165,11 +158,8 @@ CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
 }
 
 bool CWindowShaderTransformer::done() const {
-    if (m_workspaceSwitch && m_kind == EAnimationKind::OPEN)
-        return m_done || !enabled() || !m_window.lock() || m_workspaceSwitch->finished;
-
     if (m_workspaceSwitch)
-        return m_done || !enabled() || !m_window.lock() || animationCompleteByClock();
+        return m_done || !enabled() || !m_window.lock() || m_workspaceSwitch->finished;
 
     return m_done || !enabled() || !m_window.lock();
 }
@@ -230,28 +220,6 @@ float CWindowShaderTransformer::rawAnimationProgress() {
     }
 
     return elapsedProgress(m_startedAt, m_cfg);
-}
-
-bool CWindowShaderTransformer::animationComplete() {
-    if (m_workspaceSwitch) {
-        if (m_workspaceSwitch->commitWorkspaceOnFirstFrame && !m_workspaceSwitch->workspaceCommitted)
-            return m_workspaceSwitch->finished;
-
-        return m_workspaceSwitch->finished || elapsedProgress(m_workspaceSwitch->startedAt, m_workspaceSwitch->cfg) >= 1.F;
-    }
-
-    return m_startedAt && elapsedProgress(*m_startedAt, m_cfg) >= 1.F;
-}
-
-bool CWindowShaderTransformer::animationCompleteByClock() const {
-    if (m_workspaceSwitch) {
-        if (m_workspaceSwitch->commitWorkspaceOnFirstFrame && !m_workspaceSwitch->workspaceCommitted)
-            return m_workspaceSwitch->finished;
-
-        return m_workspaceSwitch->finished || elapsedProgress(m_workspaceSwitch->startedAt, m_workspaceSwitch->cfg) >= 1.F;
-    }
-
-    return m_startedAt && elapsedProgress(*m_startedAt, m_cfg) >= 1.F;
 }
 
 } // namespace hypranimated
