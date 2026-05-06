@@ -836,7 +836,7 @@ void sweepAnimations() {
 }
 
 void renderAnimatedSnapshot(void* thisptr, PHLWINDOW window) {
-    if (!enabled() || !window) {
+    if (!enabled() || !window || shouldBypassCurrentRenderPass()) {
         callOriginalRenderSnapshot(thisptr, window);
         return;
     }

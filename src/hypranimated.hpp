@@ -259,6 +259,7 @@ bool ensureFramebuffer(CFramebuffer& fb, const Vector2D& size, DRMFormat format)
 CRegion animationDamageForGeometry(const CBox& geometryPx, const Vector2D& monitorSize);
 void damageAnimationGeometry(PHLMONITOR monitor, const CBox& geometryPx);
 void forceCurrentRenderDamage(PHLMONITOR monitor, const CRegion& damage);
+bool shouldBypassCurrentRenderPass();
 UP<IPassElement> makeAnimatedShaderPassElement(SP<CTexture> texture, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize,
                                                float progress, float seed, float outputAlpha, CRegion damage);
 UP<IPassElement> makeAnimatedShaderPassElement(CFramebuffer* liveSourceFramebuffer, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx,
@@ -292,6 +293,7 @@ class CWindowShaderTransformer : public IWindowTransformer {
     int                                                      m_blurRound = 0;
     float                                                    m_blurRoundingPower = 2.F;
     float                                                    m_outputAlpha = 1.F;
+    bool                                                     m_bypassRender = false;
 
     CFramebuffer* clearPassthroughFramebuffer(PHLMONITOR monitor);
     CFramebuffer* transparentHandoffFramebuffer(PHLMONITOR monitor, CFramebuffer* fallback);

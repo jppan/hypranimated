@@ -358,6 +358,17 @@ void forceCurrentRenderDamage(PHLMONITOR monitor, const CRegion& damage) {
     g_pHyprOpenGL->setDamage(combinedDamage, combinedFinalDamage);
 }
 
+bool shouldBypassCurrentRenderPass() {
+    if (!g_pHyprOpenGL || !g_pHyprRenderer)
+        return false;
+
+    if (g_pHyprRenderer->m_bRenderingSnapshot)
+        return true;
+
+    auto& renderData = g_pHyprOpenGL->m_renderData;
+    return renderData.mainFB && renderData.outFB && renderData.mainFB == renderData.outFB;
+}
+
 UP<IPassElement> makeAnimatedShaderPassElement(SP<CTexture> texture, CAnimationShader* shader, CBox geometryPx, CBox sourceGeometryPx, Vector2D monitorSize, float progress,
                                                float seed, float outputAlpha, CRegion damage) {
     return makeUnique<CAnimatedShaderPassElement>(std::move(texture), shader, std::move(geometryPx), std::move(sourceGeometryPx), std::move(monitorSize), progress, seed,

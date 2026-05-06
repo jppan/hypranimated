@@ -42,7 +42,6 @@ Feature roadmap:
 
 Known issues:
 
-- Flickering on workspace changes whilst screen sharing with xdg-portal-hyprland
 - Fps drops on workspace changes with many windows
 
 Shader credit goes to https://github.com/liixini/shaders.

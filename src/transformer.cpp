@@ -17,8 +17,15 @@ CWindowShaderTransformer::CWindowShaderTransformer(PHLWINDOW window, EAnimationK
 }
 
 void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData* renderData) {
+    m_bypassRender = false;
+
     if (!enabled() || !renderData || !renderData->pMonitor)
         return;
+
+    if (shouldBypassCurrentRenderPass()) {
+        m_bypassRender = true;
+        return;
+    }
 
     const auto monitor = renderData->pMonitor.lock();
     if (!monitor)
@@ -76,6 +83,9 @@ void CWindowShaderTransformer::preWindowRender(CSurfacePassElement::SRenderData*
 }
 
 CFramebuffer* CWindowShaderTransformer::transform(CFramebuffer* in) {
+    if (m_bypassRender)
+        return in;
+
     if (!enabled() || !in || !in->getTexture() || !m_monitor || !m_renderTarget || (!m_workspaceSwitch && !m_shader)) {
         m_done = true;
         return in;
