@@ -45,5 +45,6 @@ Feature roadmap:
 Known issues:
 
 - Fps drops on workspace changes with many windows
+- Animation speed too high on workspace changes
 
 Shader credit goes to https://github.com/liixini/shaders.
