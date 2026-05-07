@@ -4,6 +4,8 @@
 
 Hyprland plugin that applies the GLSL shaders in a defined directory, for instance `jpOSh/shaders` to window open and close animations.
 
+![Demo GIF](demo.gif)
+
 This plugin is built against the installed Hyprland headers and checks Hyprland's plugin ABI hash at load time. Rebuild it after every Hyprland upgrade. This has been tested on hyprland 0.54.3
 
 The plugin accepts these Hyprland config values:
